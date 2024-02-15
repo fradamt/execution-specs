@@ -63,7 +63,7 @@ from .utils.hexadecimal import hex_to_address
 from .utils.message import prepare_message
 from .vm import Message
 from .vm.gas import init_code_cost
-from .vm.interpreter import MAX_CODE_SIZE, process_message_call
+from .vm.interpreter import MAX_CODE_SIZE, process_message_call, process_message
 
 BASE_FEE_MAX_CHANGE_DENOMINATOR = 8
 ELASTICITY_MULTIPLIER = 2
@@ -477,7 +477,7 @@ def apply_body(
         State after all transactions have been executed.
     """
 
-    # To be used both by parent beacon block root and parent trasaction addresses system calls
+    # To be used both by parent beacon block root and parent transaction addresses system calls
     system_tx_env = vm.Environment(
         caller=SYSTEM_ADDRESS,
         origin=SYSTEM_ADDRESS,
@@ -1084,6 +1084,5 @@ def get_parent_transactions_addresses_system_call(state: State, system_tx_env: v
         parent_evm=None,
     )
 
-    output = process_message_call(system_tx_message, system_tx_env)
-    log_data = output[0].log.data
-    return [Address(log_data[i:i+20]) for i in range(0, len(log_data) // 20)]
+    evm = process_message(system_tx_message, system_tx_env)
+    return [Address(evm.output[i:i+20]) for i in range(0, len(evm.output) // 20)]
