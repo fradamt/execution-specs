@@ -61,7 +61,7 @@ from .state import (
 from .trie import Trie, root, trie_set
 from .utils.hexadecimal import hex_to_address
 from .utils.message import prepare_message
-from .vm import Message
+from .vm import Message, Evm
 from .vm.gas import init_code_cost
 from .vm.interpreter import MAX_CODE_SIZE, process_message_call, process_message
 
@@ -517,7 +517,7 @@ def apply_body(
     )
     block_logs: Tuple[Log, ...] = ()
 
-    set_parent_transactions_addresses_calldata: Bytes = b'\x00' + Uint(len(transactions)).to_be_bytes32()
+    set_parent_transactions_addresses_calldata: Bytes = Uint(len(transactions)).to_be_bytes32()
 
     for i, tx in enumerate(map(decode_transaction, transactions)):
         trie_set(
@@ -1035,8 +1035,9 @@ def check_gas_limit(gas_limit: Uint, parent_gas_limit: Uint) -> bool:
 
     return True
 
-def set_parent_transactions_addresses_system_call(state: State, data: Bytes, system_tx_env: vm.Environment) -> None:
-    
+
+def parent_transactions_addresses_system_call(state: State, data: Bytes, system_tx_env: vm.Environment) -> Evm:
+
     parent_transactions_addresses_contract_code = get_account(
         state, PARENT_TRANSACTIONS_ADDRESSES_ADDRESS
     ).code
@@ -1058,31 +1059,12 @@ def set_parent_transactions_addresses_system_call(state: State, data: Bytes, sys
         parent_evm=None,
     )
 
-    process_message_call(system_tx_message, system_tx_env)
+    return process_message(system_tx_message, system_tx_env) 
 
 
-def get_parent_transactions_addresses_system_call(state: State, system_tx_env: vm.Environment) -> None:
-
-    parent_transactions_addresses_contract_code = get_account(
-        state, PARENT_TRANSACTIONS_ADDRESSES_ADDRESS
-    ).code
-
-    system_tx_message = Message(
-        caller=SYSTEM_ADDRESS,
-        target=PARENT_TRANSACTIONS_ADDRESSES_ADDRESS,
-        gas=SYSTEM_TRANSACTION_GAS,
-        value=U256(0),
-        data=b'\x01',
-        code=parent_transactions_addresses_contract_code,
-        depth=Uint(0),
-        current_target=PARENT_TRANSACTIONS_ADDRESSES_ADDRESS,
-        code_address=PARENT_TRANSACTIONS_ADDRESSES_ADDRESS,
-        should_transfer_value=False,
-        is_static=False,
-        accessed_addresses=set(),
-        accessed_storage_keys=set(),
-        parent_evm=None,
-    )
-
-    evm = process_message(system_tx_message, system_tx_env)
+def get_parent_transactions_addresses_system_call(state: State, system_tx_env: vm.Environment) -> List[Address]:
+    evm = parent_transactions_addresses_system_call(state=state, data=b'', system_tx_env=system_tx_env)
     return [Address(evm.output[i:i+20]) for i in range(0, len(evm.output) // 20)]
+
+def set_parent_transactions_addresses_system_call(state: State, data: Bytes, system_tx_env: vm.Environment) -> None:
+    parent_transactions_addresses_system_call(state=state, data=data, system_tx_env=system_tx_env)
