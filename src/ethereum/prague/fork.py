@@ -45,9 +45,6 @@ from .state import (
     process_withdrawal,
     set_account_balance,
     state_root,
-    begin_transaction,
-    commit_transaction,
-    rollback_transaction
 )
 from .transactions import (
     AccessListTransaction,
@@ -346,6 +343,7 @@ def check_transaction(
     tx: Transaction,
     sender_address: Address,
     gas_available: Uint,
+    base_fee_per_gas: Uint,
 ) -> Tuple[bool, Tuple[VersionedHash, ...]]:
     """
     Check if the transaction is includable in the block.
@@ -371,7 +369,22 @@ def check_transaction(
         The blob versioned hashes of the transaction.
 
     """
+
+    if isinstance(tx, (FeeMarketTransaction, BlobTransaction)):
+        priority_fee_per_gas = min(
+            tx.max_priority_fee_per_gas,
+            tx.max_fee_per_gas - base_fee_per_gas,
+        )
+        effective_gas_price = priority_fee_per_gas + base_fee_per_gas
+        max_gas_fee = tx.gas * tx.max_fee_per_gas
+    else:
+        effective_gas_price = tx.gas_price
+        max_gas_fee = tx.gas * tx.gas_price
+
     if isinstance(tx, BlobTransaction):
+        max_gas_fee += calculate_total_blob_gas(tx) * Uint(
+            tx.max_fee_per_blob_gas
+        )
         blob_versioned_hashes = tx.blob_versioned_hashes
     else:
         blob_versioned_hashes = ()
@@ -379,26 +392,13 @@ def check_transaction(
     sender_account = get_account(state, sender_address)
     is_transaction_skipped = (
         tx.gas > gas_available
-        or Uint(sender_account.balance) < tx.value
+        or Uint(sender_account.balance) >= max_gas_fee + Uint(tx.value)
         or sender_account.nonce != tx.nonce
         or sender_account.code != bytearray()
     )
 
-    return is_transaction_skipped, blob_versioned_hashes
+    return is_transaction_skipped, effective_gas_price, blob_versioned_hashes
 
-
-def calculate_effective_gas_price(tx: Transaction, base_fee_per_gas: Uint) -> Uint:
-    if isinstance(tx, (FeeMarketTransaction, BlobTransaction, SetCodeTransaction)):
-        if tx.max_fee_per_gas >= base_fee_per_gas:
-            priority_fee_per_gas = min(
-                tx.max_priority_fee_per_gas,
-                tx.max_fee_per_gas - base_fee_per_gas,
-            )
-            return priority_fee_per_gas + base_fee_per_gas
-        else:
-            return tx.max_fee_per_gas
-    else:
-        return tx.gas_price
 
 def make_receipt(
     tx: Transaction,
@@ -439,13 +439,20 @@ def make_receipt(
 def check_transaction_static(
     tx: Transaction,
     chain_id: U64,
+    base_fee_per_gas: U64,
+    excess_blob_gas: U64,
 ) -> Address:
 
     if not validate_transaction(tx):
         raise InvalidBlock
 
-    if isinstance(tx, (FeeMarketTransaction, BlobTransaction, SetCodeTransaction)):
+    if isinstance(tx, (FeeMarketTransaction, BlobTransaction)):
         if tx.max_fee_per_gas < tx.max_priority_fee_per_gas:
+            raise InvalidBlock
+        if tx.max_fee_per_gas < base_fee_per_gas:
+            raise InvalidBlock
+    else:
+        if tx.gas_price < base_fee_per_gas:
             raise InvalidBlock
 
     if isinstance(tx, BlobTransaction):
@@ -456,6 +463,9 @@ def check_transaction_static(
         for blob_versioned_hash in tx.blob_versioned_hashes:
             if blob_versioned_hash[0:1] != VERSIONED_HASH_VERSION_KZG:
                 raise InvalidBlock
+        blob_gas_price = calculate_blob_gas_price(excess_blob_gas)
+        if Uint(tx.max_fee_per_blob_gas) < blob_gas_price:
+            raise InvalidBlock
             
     return recover_sender(chain_id, tx)
 
@@ -501,7 +511,12 @@ def check_block_static(
     
     sender_addresses = []
     for i, tx in enumerate(map(decode_transaction, block.transactions)):
-        sender_address = check_transaction_static(tx, chain.chain_id)
+        sender_address = check_transaction_static(
+            tx,
+            chain.chain_id,
+            block.header.base_fee_per_gas,
+            block.header.excess_blob_gas,
+        )
         sender_addresses.append(sender_address)
         _, inclusion_gas = calculate_inclusion_gas_cost(tx)
         blob_gas_used = calculate_total_blob_gas(tx)
@@ -790,15 +805,13 @@ def apply_body(
         excess_blob_gas,
     )
 
-    # Take a snapshot of the state before the block's execution
-    begin_transaction(state)
-
     for i, tx in enumerate(decoded_transactions):
         sender_address = sender_addresses[i]
         inclusion_gas = calculate_inclusion_gas_cost(tx)
         gas_available += inclusion_gas
         (
             is_transaction_skipped,
+            effective_gas_price,
             blob_versioned_hashes,
         ) = check_transaction(
             state,
@@ -806,7 +819,6 @@ def apply_body(
             sender_address,
             gas_available,
         )
-        effective_gas_price = calculate_effective_gas_price(tx, base_fee_per_gas)
         
         if is_transaction_skipped:
             gas_available -= inclusion_gas
@@ -845,52 +857,32 @@ def apply_body(
 
             block_logs += logs
             deposit_requests += parse_deposit_requests_from_receipt(receipt)
-            
-    block_gas_used = block_gas_limit - gas_available
-
-    execution_base_fee = (block_gas_used - inclusion_gas) * base_fee_per_gas 
-    # charge the missing base fees to coinbase, conclude the block's execution
-    if coinbase_account.balance >= execution_base_fee:
-        coinbase_balance_after_block = (
-            Uint(coinbase_account.balance) - execution_base_fee
-        )
-        set_account_balance(
-            state,
-            coinbase,
-            U256(coinbase_balance_after_block),
-        )
-        commit_transaction(state)
-        requests_from_execution = process_general_purpose_requests(
-            deposit_requests,
-            state,
-            block_hashes,
-            coinbase,
-            block_number,
-            base_fee_per_gas,
-            block_gas_limit,
-            block_time,
-            prev_randao,
-            chain_id,
-            excess_blob_gas,
-        )
-    # Coinbase can't pay for the missing base fees. Rollback the state
-    # to the snapshot taken before the block's execution
-    else:
-        rollback_transaction(state)
-        block_logs = ()
-        requests_from_execution = []
-        receipts_trie = Trie(secured=False, default=None)
-
-    receipt_root = root(receipts_trie)
-    block_logs_bloom = logs_bloom(block_logs)
-    state_root = state_root(state)
-    requests_hash = compute_requests_hash(requests_from_execution)
 
     for i, wd in enumerate(withdrawals):
         process_withdrawal(state, wd)
 
         if account_exists_and_is_empty(state, wd.address):
             destroy_account(state, wd.address)
+
+    requests_from_execution = process_general_purpose_requests(
+        deposit_requests,
+        state,
+        block_hashes,
+        coinbase,
+        block_number,
+        base_fee_per_gas,
+        block_gas_limit,
+        block_time,
+        prev_randao,
+        chain_id,
+        excess_blob_gas,
+    )
+
+    block_gas_used = block_gas_limit - gas_available
+    receipt_root = root(receipts_trie)
+    block_logs_bloom = logs_bloom(block_logs)
+    state_root = state_root(state)
+    requests_hash = compute_requests_hash(requests_from_execution)
 
     return ApplyBodyOutput(
         block_gas_used,
@@ -1031,18 +1023,14 @@ def process_transaction(
     coinbase_account = get_account(env.state, env.coinbase)
     increment_nonce(env.state, sender)
 
-    blob_gas_fee = calculate_data_fee(env.excess_blob_gas, tx)
     max_gas_fee = tx.gas * env.gas_price
-    max_sender_fee = max_gas_fee + blob_gas_fee
-    sender_fee = min(
-        max_sender_fee,
-        Uint(sender_account.balance),
-    )
-    # deduct the max possible tx fee from the sender
+    blob_gas_fee = calculate_data_fee(env.excess_blob_gas, tx)
+
     sender_balance_after_gas_fee = (
-        Uint(sender_account.balance) - sender_fee
+        sender_account.balance
+        - U256(max_gas_fee + blob_gas_fee)
     )
-    set_account_balance(env.state, sender, U256(sender_balance_after_gas_fee))
+    set_account_balance(env.state, sender, sender_balance_after_gas_fee)
 
     preaccessed_addresses = set()
     preaccessed_storage_keys = set()
@@ -1091,40 +1079,32 @@ def process_transaction(
     # floor cost.
     total_gas_used = max(total_gas_used, calldata_floor_gas_cost)
     gas_refund_amount = (tx.gas - total_gas_used) * env.gas_price
-    max_sender_fee -= gas_refund_amount
-    # Sender has already paid more than its should, refund the difference
-    if max_sender_fee < sender_fee:
-        refund = sender_fee - max_sender_fee
-        sender_balance_after_transaction = (
-            sender_account.balance
-            + U256(refund)
-        )
-        total_sender_fee = max_sender_fee
-    # Sender has paid less than it should, deduct the
-    # difference, up to the sender's balance
-    else:
-        remaining_fee = min(
-            Uint(sender_account.balance),
-            max_sender_fee - sender_fee,
-        )
-        sender_balance_after_transaction = (
-            sender_account.balance
-            + U256(remaining_fee)
-        )
-        total_sender_fee = sender_fee + remaining_fee
-    set_account_balance(env.state, sender, sender_balance_after_transaction)
 
-    # Coinbase receives all sender fees
-    coinbase_balance_after_sender_fee = (
-        coinbase_account.balance
-        + U256(total_sender_fee)
+    # For non-1559 transactions env.gas_price == tx.gas_price
+    priority_fee_per_gas = env.gas_price - env.base_fee_per_gas
+    priority_fee = total_gas_used * priority_fee_per_gas
+
+    # refund gas
+    sender_balance_after_refund = (
+        sender_account.balance 
+        + U256(gas_refund_amount)
     )
+    set_account_balance(env.state, sender, sender_balance_after_refund)
 
-    if coinbase_balance_after_sender_fee != 0:
+    inclusion_cost_refund = (
+        calculate_inclusion_gas_cost(tx)[1] * env.base_fee_per_gas
+        + blob_gas_fee
+    )
+    
+    # transfer priority fees and refund inclusion cost
+    coinbase_balance_after_transaction = (
+        coinbase_account.balance 
+        + U256(priority_fee)
+        + U256(inclusion_cost_refund)
+    )
+    if coinbase_balance_after_transaction != 0:
         set_account_balance(
-            env.state, 
-            env.coinbase, 
-            coinbase_balance_after_sender_fee,
+            env.state, env.coinbase, coinbase_balance_after_transaction
         )
     elif account_exists_and_is_empty(env.state, env.coinbase):
         destroy_account(env.state, env.coinbase)

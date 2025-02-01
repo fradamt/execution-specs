@@ -349,10 +349,7 @@ def calculate_blob_gas_price(excess_blob_gas: U64) -> Uint:
 
 
 def calculate_data_fee(excess_blob_gas: U64, tx: Transaction) -> Uint:
-    if isinstance(tx, BlobTransaction):
-        return min(
-            tx.max_fee_per_blob_gas, 
-            calculate_blob_gas_price(excess_blob_gas)
-        ) * calculate_total_blob_gas(tx)
-    else:
-        return Uint(0)
+    return (
+        calculate_total_blob_gas(tx)
+        * calculate_blob_gas_price(excess_blob_gas)
+    )
