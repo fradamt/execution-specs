@@ -474,6 +474,10 @@ def check_transaction_static(
             if blob_versioned_hash[0:1] != VERSIONED_HASH_VERSION_KZG:
                 raise InvalidBlock
             
+    if isinstance(tx, SetCodeTransaction):
+        if not any(tx.authorizations):
+            raise InvalidBlock    
+        
     return recover_sender(chain_id, tx)
 
 def check_block_static(
