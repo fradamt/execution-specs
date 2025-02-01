@@ -213,7 +213,7 @@ def validate_transaction(tx: Transaction) -> Tuple[Uint, Uint]:
 
     return True
 
-def calculate_inclusion_gas_cost(tx: Transaction) -> Uint:
+def calculate_inclusion_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
     """
     Calculates the gas that is charged for a transaction that is included,
     regardless of whether it is executed or skipped.
