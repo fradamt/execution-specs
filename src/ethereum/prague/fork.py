@@ -370,7 +370,7 @@ def check_transaction(
 
     """
 
-    if isinstance(tx, (FeeMarketTransaction, BlobTransaction)):
+    if isinstance(tx, (FeeMarketTransaction, BlobTransaction, SetCodeTransaction)):
         priority_fee_per_gas = min(
             tx.max_priority_fee_per_gas,
             tx.max_fee_per_gas - base_fee_per_gas,
@@ -390,11 +390,15 @@ def check_transaction(
         blob_versioned_hashes = ()
 
     sender_account = get_account(state, sender_address)
+    is_sender_eoa = (
+        sender_account.code == bytearray() 
+        or is_valid_delegation(sender_account.code)
+    )
     is_transaction_skipped = (
         tx.gas > gas_available
         or Uint(sender_account.balance) >= max_gas_fee + Uint(tx.value)
         or sender_account.nonce != tx.nonce
-        or sender_account.code != bytearray()
+        or not is_sender_eoa
     )
 
     return is_transaction_skipped, effective_gas_price, blob_versioned_hashes
@@ -446,7 +450,7 @@ def check_transaction_static(
     if not validate_transaction(tx):
         raise InvalidBlock
 
-    if isinstance(tx, (FeeMarketTransaction, BlobTransaction)):
+    if isinstance(tx, (FeeMarketTransaction, BlobTransaction, SetCodeTransaction)):
         if tx.max_fee_per_gas < tx.max_priority_fee_per_gas:
             raise InvalidBlock
         if tx.max_fee_per_gas < base_fee_per_gas:
@@ -466,6 +470,10 @@ def check_transaction_static(
         blob_gas_price = calculate_blob_gas_price(excess_blob_gas)
         if Uint(tx.max_fee_per_blob_gas) < blob_gas_price:
             raise InvalidBlock
+        
+    if isinstance(tx, SetCodeTransaction):
+        if not any(tx.authorizations):
+            raise InvalidBlock       
             
     return recover_sender(chain_id, tx)
 
