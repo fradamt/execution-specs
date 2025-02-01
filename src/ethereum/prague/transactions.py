@@ -203,7 +203,7 @@ def validate_transaction(tx: Transaction) -> Tuple[Uint, Uint]:
     """
     from .vm.interpreter import MAX_CODE_SIZE
 
-    intrinsic_gas, calldata_floor_gas_cost = calculate_intrinsic_cost(tx)
+    intrinsic_gas, calldata_floor_gas_cost = calculate_intrinsic_gas_cost(tx)
     if max(intrinsic_gas, calldata_floor_gas_cost) > tx.gas:
         return False
     if U256(tx.nonce) >= U256(U64.MAX_VALUE):
@@ -275,7 +275,7 @@ def calculate_intrinsic_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
     inclusion_gas, inclusion_gas_floor = calculate_inclusion_gas_cost(tx)
 
     if tx.to == Bytes0(b""):
-        create_cost = TX_CREATE_COST + init_code_cost(ulen(tx.data))
+        create_cost = TX_CREATE_COST + init_code_cost(len(tx.data))
     else:
         create_cost = Uint(0)
 
@@ -291,7 +291,7 @@ def calculate_intrinsic_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
     ):
         for _address, keys in tx.access_list:
             access_list_cost += TX_ACCESS_LIST_ADDRESS_COST
-            access_list_cost += ulen(keys) * TX_ACCESS_LIST_STORAGE_KEY_COST
+            access_list_cost += len(keys) * TX_ACCESS_LIST_STORAGE_KEY_COST
 
     auth_cost = Uint(0)
     if isinstance(tx, SetCodeTransaction):
