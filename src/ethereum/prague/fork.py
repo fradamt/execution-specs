@@ -396,7 +396,7 @@ def check_transaction(
     )
     is_transaction_skipped = (
         tx.gas > gas_available
-        or Uint(sender_account.balance) >= max_gas_fee + Uint(tx.value)
+        or Uint(sender_account.balance) < max_gas_fee + Uint(tx.value)
         or sender_account.nonce != tx.nonce
         or not is_sender_eoa
     )
