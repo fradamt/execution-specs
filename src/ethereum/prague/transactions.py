@@ -9,7 +9,7 @@ from typing import Tuple, Union
 from ethereum_rlp import rlp
 from ethereum_types.bytes import Bytes, Bytes0, Bytes32
 from ethereum_types.frozen import slotted_freezable
-from ethereum_types.numeric import U64, U256, Uint
+from ethereum_types.numeric import U64, U256, Uint, ulen
 
 from ethereum.crypto.elliptic_curve import SECP256K1N, secp256k1_recover
 from ethereum.crypto.hash import Hash32, keccak256
@@ -275,7 +275,7 @@ def calculate_intrinsic_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
     inclusion_gas, inclusion_gas_floor = calculate_inclusion_gas_cost(tx)
 
     if tx.to == Bytes0(b""):
-        create_cost = TX_CREATE_COST + init_code_cost(len(tx.data))
+        create_cost = TX_CREATE_COST + init_code_cost(ulen(tx.data))
     else:
         create_cost = Uint(0)
 
@@ -291,7 +291,7 @@ def calculate_intrinsic_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
     ):
         for _address, keys in tx.access_list:
             access_list_cost += TX_ACCESS_LIST_ADDRESS_COST
-            access_list_cost += len(keys) * TX_ACCESS_LIST_STORAGE_KEY_COST
+            access_list_cost += ulen(keys) * TX_ACCESS_LIST_STORAGE_KEY_COST
 
     auth_cost = Uint(0)
     if isinstance(tx, SetCodeTransaction):
