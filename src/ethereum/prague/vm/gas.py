@@ -349,7 +349,21 @@ def calculate_blob_gas_price(excess_blob_gas: U64) -> Uint:
 
 
 def calculate_data_fee(excess_blob_gas: U64, tx: Transaction) -> Uint:
-    return (
-        calculate_total_blob_gas(tx)
-        * calculate_blob_gas_price(excess_blob_gas)
+    """
+    Calculate the blob data fee for a transaction.
+
+    Parameters
+    ----------
+    excess_blob_gas :
+        The excess_blob_gas for the execution.
+    tx :
+        The transaction for which the blob data fee is to be calculated.
+
+    Returns
+    -------
+    data_fee: `Uint`
+        The blob data fee.
+    """
+    return calculate_total_blob_gas(tx) * calculate_blob_gas_price(
+        excess_blob_gas
     )
