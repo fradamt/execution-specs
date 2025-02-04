@@ -198,7 +198,7 @@ def state_transition(chain: BlockChain, block: Block) -> None:
     block :
         Block to apply to `chain`.
     """
-    sender_addresses = check_block_static(chain, block)
+    sender_addresses = validate_block(chain, block)
 
     apply_body_output = apply_body(
         chain.state,
@@ -477,7 +477,7 @@ def check_transaction_static(
             
     return recover_sender(chain_id, tx)
 
-def check_block_static(
+def validate_block(
     chain: BlockChain,
     block: Block,
 ) -> List[Address]:
