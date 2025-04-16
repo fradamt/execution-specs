@@ -17,13 +17,12 @@ from ethereum.exceptions import InvalidSignatureError
 
 from .exceptions import TransactionTypeError
 from .fork_types import Address, Authorization, VersionedHash
+from .vm.gas import calculate_total_access_list_gas
 
 TX_BASE_COST = Uint(21000)
 FLOOR_CALLDATA_COST = Uint(10)
 STANDARD_CALLDATA_TOKEN_COST = Uint(4)
 TX_CREATE_COST = Uint(32000)
-TX_ACCESS_LIST_ADDRESS_COST = Uint(2400)
-TX_ACCESS_LIST_STORAGE_KEY_COST = Uint(1900)
 
 
 @slotted_freezable
@@ -241,9 +240,11 @@ def calculate_inclusion_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
 
     data_cost = tokens_in_calldata * STANDARD_CALLDATA_TOKEN_COST
 
+    access_list_cost = calculate_total_access_list_gas(tx)
+
     return (
-        Uint(TX_BASE_COST + data_cost),
-        Uint(TX_BASE_COST + calldata_floor_gas_cost),
+        Uint(TX_BASE_COST + data_cost + access_list_cost),
+        Uint(TX_BASE_COST + calldata_floor_gas_cost + access_list_cost),
     )
 
 def calculate_intrinsic_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
@@ -282,20 +283,6 @@ def calculate_intrinsic_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
     else:
         create_cost = Uint(0)
 
-    access_list_cost = Uint(0)
-    if isinstance(
-        tx,
-        (
-            AccessListTransaction,
-            FeeMarketTransaction,
-            BlobTransaction,
-            SetCodeTransaction,
-        ),
-    ):
-        for _address, keys in tx.access_list:
-            access_list_cost += TX_ACCESS_LIST_ADDRESS_COST
-            access_list_cost += ulen(keys) * TX_ACCESS_LIST_STORAGE_KEY_COST
-
     auth_cost = Uint(0)
     if isinstance(tx, SetCodeTransaction):
         auth_cost += Uint(PER_EMPTY_ACCOUNT_COST * len(tx.authorizations))
@@ -304,7 +291,6 @@ def calculate_intrinsic_gas_cost(tx: Transaction) -> Tuple[Uint, Uint]:
         Uint(
             inclusion_gas
             + create_cost
-            + access_list_cost
             + auth_cost
         ),
         inclusion_gas_floor,

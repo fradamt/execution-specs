@@ -20,7 +20,7 @@ from ethereum.trace import GasAndRefund, evm_trace
 from ethereum.utils.numeric import ceil32, taylor_exponential
 
 from ..blocks import Header
-from ..transactions import BlobTransaction, Transaction
+from ..transactions import BlobTransaction, Transaction, AccessListTransaction, FeeMarketTransaction, SetCodeTransaction
 from . import Evm
 from .exceptions import OutOfGasError
 
@@ -72,6 +72,9 @@ TARGET_BLOB_GAS_PER_BLOCK = U64(786432)
 GAS_PER_BLOB = Uint(2**17)
 MIN_BLOB_GASPRICE = Uint(1)
 BLOB_GASPRICE_UPDATE_FRACTION = Uint(5007716)
+
+TX_ACCESS_LIST_ADDRESS_COST = Uint(2400)
+TX_ACCESS_LIST_STORAGE_KEY_COST = Uint(1900)
 
 GAS_BLS_G1_ADD = Uint(375)
 GAS_BLS_G1_MUL = Uint(12000)
@@ -325,6 +328,37 @@ def calculate_total_blob_gas(tx: Transaction) -> Uint:
         return GAS_PER_BLOB * Uint(len(tx.blob_versioned_hashes))
     else:
         return Uint(0)
+
+
+def calculate_total_access_list_gas(tx: Transaction) -> Uint:
+    """
+    Calculate the total gas cost for an access list in a transaction.
+
+    Parameters
+    ----------
+    tx :
+        The transaction for which the access list gas is to be calculated.
+
+    Returns
+    -------
+    access_list_gas: `ethereum.base_types.Uint`
+        The total gas cost for the access list.
+    """    
+    access_list_gas = Uint(0)
+    if isinstance(
+        tx,
+        (
+            AccessListTransaction,
+            FeeMarketTransaction,
+            BlobTransaction,
+            SetCodeTransaction,
+        ),
+    ):
+        for _address, keys in tx.access_list:
+            access_list_gas += TX_ACCESS_LIST_ADDRESS_COST
+            access_list_gas += Uint(len(keys)) * TX_ACCESS_LIST_STORAGE_KEY_COST
+    
+    return access_list_gas
 
 
 def calculate_blob_gas_price(excess_blob_gas: U64) -> Uint:
