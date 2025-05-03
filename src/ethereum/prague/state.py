@@ -17,9 +17,9 @@ There is a distinction between an account that does not exist and
 `EMPTY_ACCOUNT`.
 """
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from ethereum_types.bytes import Bytes, Bytes32
+from ethereum_types.bytes import Bytes
 from ethereum_types.frozen import modify
 from ethereum_types.numeric import U256, Uint
 
@@ -37,13 +37,12 @@ class State:
     _main_trie: Trie[Address, Optional[Account]] = field(
         default_factory=lambda: Trie(secured=True, default=None)
     )
-    _storage_tries: Dict[Address, Trie[Bytes32, U256]] = field(
+    _storage_tries: Dict[Address, Trie[Bytes, U256]] = field(
         default_factory=dict
     )
     _snapshots: List[
         Tuple[
-            Trie[Address, Optional[Account]],
-            Dict[Address, Trie[Bytes32, U256]],
+            Trie[Address, Optional[Account]], Dict[Address, Trie[Bytes, U256]]
         ]
     ] = field(default_factory=list)
     created_accounts: Set[Address] = field(default_factory=set)
@@ -56,8 +55,8 @@ class TransientStorage:
     within a transaction.
     """
 
-    _tries: Dict[Address, Trie[Bytes32, U256]] = field(default_factory=dict)
-    _snapshots: List[Dict[Address, Trie[Bytes32, U256]]] = field(
+    _tries: Dict[Address, Trie[Bytes, U256]] = field(default_factory=dict)
+    _snapshots: List[Dict[Address, Trie[Bytes, U256]]] = field(
         default_factory=list
     )
 
@@ -74,7 +73,8 @@ def close_state(state: State) -> None:
 
 
 def begin_transaction(
-    state: State, transient_storage: TransientStorage
+    state: State, 
+    transient_storage: Optional[TransientStorage] = None
 ) -> None:
     """
     Start a state transaction.
@@ -95,13 +95,17 @@ def begin_transaction(
             {k: copy_trie(t) for (k, t) in state._storage_tries.items()},
         )
     )
-    transient_storage._snapshots.append(
-        {k: copy_trie(t) for (k, t) in transient_storage._tries.items()}
-    )
 
+    # transient storage is not provided when 
+    # taking a block level snapshot
+    if transient_storage is not None:
+        transient_storage._snapshots.append(
+            {k: copy_trie(t) for (k, t) in transient_storage._tries.items()}
+        )
 
 def commit_transaction(
-    state: State, transient_storage: TransientStorage
+    state: State, 
+    transient_storage: Optional[TransientStorage] = None
 ) -> None:
     """
     Commit a state transaction.
@@ -114,14 +118,19 @@ def commit_transaction(
         The transient storage of the transaction.
     """
     state._snapshots.pop()
-    if not state._snapshots:
+    if len(state._snapshots) == 1:
         state.created_accounts.clear()
 
-    transient_storage._snapshots.pop()
+    # transient storage is not provided when 
+    # doing a block level commit
+    if transient_storage is not None:
+        transient_storage._snapshots.pop()
+
 
 
 def rollback_transaction(
-    state: State, transient_storage: TransientStorage
+    state: State, 
+    transient_storage: Optional[TransientStorage] = None
 ) -> None:
     """
     Rollback a state transaction, resetting the state to the point when the
@@ -135,10 +144,13 @@ def rollback_transaction(
         The transient storage of the transaction.
     """
     state._main_trie, state._storage_tries = state._snapshots.pop()
-    if not state._snapshots:
+    if len(state._snapshots) == 1:
         state.created_accounts.clear()
 
-    transient_storage._tries = transient_storage._snapshots.pop()
+    # transient storage is not provided when 
+    # doing a block level rollback
+    if transient_storage is not None:
+        transient_storage._tries = transient_storage._snapshots.pop()
 
 
 def get_account(state: State, address: Address) -> Account:
@@ -262,7 +274,7 @@ def mark_account_created(state: State, address: Address) -> None:
     state.created_accounts.add(address)
 
 
-def get_storage(state: State, address: Address, key: Bytes32) -> U256:
+def get_storage(state: State, address: Address, key: Bytes) -> U256:
     """
     Get a value at a storage key on an account. Returns `U256(0)` if the
     storage key has not been set previously.
@@ -292,7 +304,7 @@ def get_storage(state: State, address: Address, key: Bytes32) -> U256:
 
 
 def set_storage(
-    state: State, address: Address, key: Bytes32, value: U256
+    state: State, address: Address, key: Bytes, value: U256
 ) -> None:
     """
     Set a value at a storage key on an account. Setting to `U256(0)` deletes
@@ -627,7 +639,7 @@ def set_code(state: State, address: Address, code: Bytes) -> None:
     modify_state(state, address, write_code)
 
 
-def get_storage_original(state: State, address: Address, key: Bytes32) -> U256:
+def get_storage_original(state: State, address: Address, key: Bytes) -> U256:
     """
     Get the original value in a storage slot i.e. the value before the current
     transaction began. This function reads the value from the snapshots taken
@@ -661,7 +673,7 @@ def get_storage_original(state: State, address: Address, key: Bytes32) -> U256:
 
 
 def get_transient_storage(
-    transient_storage: TransientStorage, address: Address, key: Bytes32
+    transient_storage: TransientStorage, address: Address, key: Bytes
 ) -> U256:
     """
     Get a value at a storage key on an account from transient storage.
@@ -692,7 +704,7 @@ def get_transient_storage(
 def set_transient_storage(
     transient_storage: TransientStorage,
     address: Address,
-    key: Bytes32,
+    key: Bytes,
     value: U256,
 ) -> None:
     """
@@ -719,7 +731,7 @@ def set_transient_storage(
 
 
 def destroy_touched_empty_accounts(
-    state: State, touched_accounts: Set[Address]
+    state: State, touched_accounts: Iterable[Address]
 ) -> None:
     """
     Destroy all touched accounts that are empty.
@@ -727,7 +739,7 @@ def destroy_touched_empty_accounts(
     ----------
     state: `State`
         The current state.
-    touched_accounts: `Set[Address]`
+    touched_accounts: `Iterable[Address]`
         All the accounts that have been touched in the current transaction.
     """
     for address in touched_accounts:

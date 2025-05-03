@@ -58,7 +58,7 @@ class Header:
     difficulty: Uint
     number: Uint
     gas_limit: Uint
-    parent_gas_used: Uint
+    gas_used: Uint
     timestamp: U256
     extra_data: Bytes
     prev_randao: Bytes32
@@ -69,9 +69,6 @@ class Header:
     excess_blob_gas: U64
     parent_beacon_block_root: Root
     parent_requests_hash: Hash32
-    y_parity: U256
-    r: U256
-    s: U256
 
 
 @slotted_freezable
