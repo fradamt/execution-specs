@@ -748,8 +748,16 @@ def apply_body(
             sender_account,
             U256(balance),
         )
-        
+    
+    should_rollback = False
     for i, tx in enumerate(map(decode_transaction, transactions)):
+        # If the execution has already exceed block_gas_used or
+        # could exceed the block_gas_limit, abort and rollback.
+        if (total_gas_used > block_gas_used 
+            or total_gas_used + tx.gas > block_gas_limit):
+            should_rollback = True
+            break
+
         sender_address = recover_sender(chain_id, tx)
         effective_gas_price = calculate_effective_gas_price(tx, base_fee_per_gas)
         blob_versioned_hashes = tx.blob_versioned_hashes if isinstance(tx, BlobTransaction)  else ()
@@ -789,9 +797,11 @@ def apply_body(
         block_logs += logs
         deposit_requests += parse_deposit_requests_from_receipt(receipt)
 
-    # If the actual gas used does not match the header, rollback.
+    # If the execution ended prematurely or 
+    # the actual gas used does not match the header, rollback.
     # The payload has empty logs, requests and receipts
-    if block_gas_used != total_gas_used:
+    should_rollback = should_rollback or block_gas_used != total_gas_used
+    if should_rollback:
         rollback_transaction(state)
         block_logs = ()
         requests_from_execution = []
