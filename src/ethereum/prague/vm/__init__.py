@@ -40,6 +40,7 @@ class BlockEnvironment:
     chain_id: U64
     state: State
     block_gas_limit: Uint
+    block_gas_used: Uint
     block_hashes: List[Hash32]
     coinbase: Address
     number: Uint
@@ -59,8 +60,6 @@ class BlockOutput:
 
     block_gas_used : `ethereum.base_types.Uint`
         Gas used for executing all transactions.
-    transactions_trie : `ethereum.fork_types.Root`
-        Trie of all the transactions in the block.
     receipts_trie : `ethereum.fork_types.Root`
         Trie root of all the receipts in the block.
     receipt_keys :
@@ -68,29 +67,19 @@ class BlockOutput:
     block_logs : `Bloom`
         Logs bloom of all the logs included in all the transactions of the
         block.
-    withdrawals_trie : `ethereum.fork_types.Root`
-        Trie root of all the withdrawals in the block.
-    blob_gas_used : `ethereum.base_types.U64`
-        Total blob gas used in the block.
     requests : `Bytes`
         Hash of all the requests in the block.
+    execution_reverted : `bool`
+        Whether the execution was reverted.
     """
-
-    block_gas_used: Uint = Uint(0)
-    transactions_trie: Trie[
-        Bytes, Optional[Union[Bytes, LegacyTransaction]]
-    ] = field(default_factory=lambda: Trie(secured=False, default=None))
+    block_gas_used: Uint
     receipts_trie: Trie[Bytes, Optional[Union[Bytes, Receipt]]] = field(
         default_factory=lambda: Trie(secured=False, default=None)
     )
     receipt_keys: Tuple[Bytes, ...] = field(default_factory=tuple)
     block_logs: Tuple[Log, ...] = field(default_factory=tuple)
-    withdrawals_trie: Trie[Bytes, Optional[Union[Bytes, Withdrawal]]] = field(
-        default_factory=lambda: Trie(secured=False, default=None)
-    )
-    blob_gas_used: U64 = U64(0)
     requests: List[Bytes] = field(default_factory=list)
-
+    execution_reverted: bool = False
 
 @dataclass
 class TransactionEnvironment:

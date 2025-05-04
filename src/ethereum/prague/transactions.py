@@ -13,7 +13,7 @@ from ethereum_types.numeric import U64, U256, Uint, ulen
 
 from ethereum.crypto.elliptic_curve import SECP256K1N, secp256k1_recover
 from ethereum.crypto.hash import Hash32, keccak256
-from ethereum.exceptions import InvalidSignatureError, InvalidTransaction
+from ethereum.exceptions import InvalidSignatureError
 
 from .exceptions import TransactionTypeError
 from .fork_types import Address, Authorization, VersionedHash
@@ -186,53 +186,6 @@ def decode_transaction(tx: Union[LegacyTransaction, Bytes]) -> Transaction:
             raise TransactionTypeError(tx[0])
     else:
         return tx
-
-
-def validate_transaction(tx: Transaction) -> Tuple[Uint, Uint]:
-    """
-    Verifies a transaction.
-
-    The gas in a transaction gets used to pay for the intrinsic cost of
-    operations, therefore if there is insufficient gas then it would not
-    be possible to execute a transaction and it will be declared invalid.
-
-    Additionally, the nonce of a transaction must not equal or exceed the
-    limit defined in `EIP-2681 <https://eips.ethereum.org/EIPS/eip-2681>`_.
-    In practice, defining the limit as ``2**64-1`` has no impact because
-    sending ``2**64-1`` transactions is improbable. It's not strictly
-    impossible though, ``2**64-1`` transactions is the entire capacity of the
-    Ethereum blockchain at 2022 gas limits for a little over 22 years.
-
-    Parameters
-    ----------
-    tx :
-        Transaction to validate.
-
-    Returns
-    -------
-    intrinsic_gas : `ethereum.base_types.Uint`
-        The intrinsic cost of the transaction.
-    calldata_floor_gas_cost : `ethereum.base_types.Uint`
-        The eip-7623 minimum gas cost charged to the transaction
-        based on the calldata size.
-
-    Raises
-    ------
-    InvalidBlock :
-        If the transaction is not valid.
-    """
-    from .vm.interpreter import MAX_CODE_SIZE
-
-    intrinsic_gas, calldata_floor_gas_cost = calculate_intrinsic_cost(tx)
-    if max(intrinsic_gas, calldata_floor_gas_cost) > tx.gas:
-        raise InvalidTransaction("Insufficient gas")
-    if U256(tx.nonce) >= U256(U64.MAX_VALUE):
-        raise InvalidTransaction("Nonce too high")
-    if tx.to == Bytes0(b"") and len(tx.data) > 2 * MAX_CODE_SIZE:
-        raise InvalidTransaction("Code size too large")
-
-    return intrinsic_gas, calldata_floor_gas_cost
-
 
 def calculate_intrinsic_cost(tx: Transaction) -> Tuple[Uint, Uint]:
     """
