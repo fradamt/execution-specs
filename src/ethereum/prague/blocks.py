@@ -69,6 +69,7 @@ class Header:
     excess_blob_gas: U64
     parent_beacon_block_root: Root
     parent_requests_hash: Hash32
+    parent_execution_reverted: bool
 
 
 @slotted_freezable

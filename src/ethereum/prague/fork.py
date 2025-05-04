@@ -113,6 +113,7 @@ class BlockChain:
     last_receipt_root: Root
     last_block_logs_bloom: Bloom
     last_requests_hash: Bytes
+    last_execution_reverted: bool
     
 
 
@@ -223,6 +224,7 @@ def state_transition(chain: BlockChain, block: Block) -> None:
     chain.last_block_logs_bloom = apply_body_output.block_logs_bloom
     chain.last_receipt_root = apply_body_output.receipt_root
     chain.last_requests_hash = apply_body_output.requests_hash
+    chain.last_execution_reverted = apply_body_output.execution_reverted
     chain.blocks.append(block)
     if len(chain.blocks) > 255:
         # Real clients have to store more blocks to deal with reorgs, but the
@@ -310,10 +312,13 @@ def validate_header(header: Header, parent_header: Header) -> None:
     parent_header :
         Parent Header of the header to check for correctness
     """
+    # If parent block was reverted, use 0 as parent_gas_used
+    parent_gas_used = Uint(0) if parent_header.execution_reverted else parent_header.gas_used
+
     expected_base_fee_per_gas = calculate_base_fee_per_gas(
         header.gas_limit,
         parent_header.gas_limit,
-        header.parent_gas_used,
+        parent_gas_used,
         parent_header.base_fee_per_gas,
     )
     excess_blob_gas = calculate_excess_blob_gas(parent_header)
@@ -437,6 +442,8 @@ def validate_block(
         raise InvalidBlock
     if block.header.pre_state_root != state_root(chain.state):
         raise InvalidBlock
+    if block.header.parent_execution_reverted != chain.last_execution_reverted:
+        raise InvalidBlock
 
     if block.ommers != ():
         raise InvalidBlock
@@ -521,12 +528,15 @@ class ApplyBodyOutput:
         State root after all transactions have been executed.
     requests_hash : `Bytes`
         Hash of all the requests in the block.
+    execution_reverted : `bool`
+        Whether the block execution was reverted due to gas mismatch.
     """
 
     receipt_root: Root
     block_logs_bloom: Bloom
     state_root: Root
     requests_hash: Bytes
+    execution_reverted: bool
 
 
 def process_system_transaction(
@@ -749,13 +759,13 @@ def apply_body(
             U256(balance),
         )
     
-    should_rollback = False
+    execution_reverted = False
     for i, tx in enumerate(map(decode_transaction, transactions)):
         # If the execution has already exceed block_gas_used or
         # could exceed the block_gas_limit, abort and rollback.
         if (total_gas_used > block_gas_used 
             or total_gas_used + tx.gas > block_gas_limit):
-            should_rollback = True
+            execution_reverted = True
             break
 
         sender_address = recover_sender(chain_id, tx)
@@ -800,8 +810,8 @@ def apply_body(
     # If the execution ended prematurely or 
     # the actual gas used does not match the header, rollback.
     # The payload has empty logs, requests and receipts
-    should_rollback = should_rollback or block_gas_used != total_gas_used
-    if should_rollback:
+    execution_reverted = execution_reverted or block_gas_used != total_gas_used
+    if execution_reverted:
         rollback_transaction(state)
         block_logs = ()
         requests_from_execution = []
@@ -838,6 +848,7 @@ def apply_body(
         block_logs_bloom,
         state_root,
         requests_hash,
+        execution_reverted,
     )
 
 
