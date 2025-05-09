@@ -109,6 +109,7 @@ class BlockChain:
     blocks: List[Block]
     state: State
     chain_id: U64
+    last_transactions_root: Root
     last_receipt_root: Root
     last_block_logs_bloom: Bloom
     last_requests_hash: Bytes
@@ -222,11 +223,13 @@ def state_transition(chain: BlockChain, block: Block) -> None:
         withdrawals=block.withdrawals,
     )
 
+    transactions_root = root(block_output.transactions_trie)
     receipt_root = root(block_output.receipts_trie)
     block_logs_bloom = logs_bloom(block_output.block_logs)
     requests_hash = compute_requests_hash(block_output.requests)
 
     chain.last_block_logs_bloom = block_logs_bloom
+    chain.last_transactions_root = transactions_root
     chain.last_receipt_root = receipt_root
     chain.last_requests_hash =  requests_hash
     chain.last_execution_reverted = block_output.execution_reverted
@@ -361,6 +364,8 @@ def validate_header(chain: BlockChain, header: Header) -> None:
         raise InvalidBlock
     
     # validate deferred execution outputs from the parent
+    if header.parent_transactions_root != chain.last_transactions_root:
+        raise InvalidBlock
     if header.parent_receipt_root != chain.last_receipt_root:
         raise InvalidBlock
     if header.parent_bloom != chain.last_block_logs_bloom:
@@ -401,9 +406,6 @@ def validate_block(chain: BlockChain, block: Block) -> None:
     """
     total_inclusion_gas = Uint(0)
     total_blob_gas_used = Uint(0)
-    transactions_trie: Trie[
-        Bytes, Optional[Union[Bytes, LegacyTransaction]]
-    ] = Trie(secured=False, default=None)
     withdrawals_trie: Trie[Bytes, Optional[Union[Bytes, Withdrawal]]] = Trie(
         secured=False, default=None
     )
@@ -421,10 +423,6 @@ def validate_block(chain: BlockChain, block: Block) -> None:
     for i, tx in enumerate(map(decode_transaction, block.transactions)):
         validate_transaction(tx, block.header.base_fee_per_gas, block.header.excess_blob_gas)
         sender_address = recover_sender(chain.chain_id, tx)
-
-        trie_set(
-            transactions_trie, rlp.encode(Uint(i)), encode_transaction(tx)
-        )
 
         intrinsic_gas, calldata_floor_gas_cost = calculate_intrinsic_cost(tx)
         blob_gas_used = calculate_total_blob_gas(tx)
@@ -462,8 +460,6 @@ def validate_block(chain: BlockChain, block: Block) -> None:
     for i, wd in enumerate(block.withdrawals):
         trie_set(withdrawals_trie, rlp.encode(Uint(i)), rlp.encode(wd))
 
-    if block.header.transactions_root != root(transactions_trie):
-        raise InvalidBlock
     if block.header.withdrawals_root != root(withdrawals_trie):
         raise InvalidBlock
 
@@ -714,6 +710,7 @@ def process_transactions(block_env: vm.BlockEnvironment, block_output: vm.BlockO
     if block_output.execution_reverted:
         rollback_transaction(block_env.state)
         block_output.block_gas_used = Uint(0)
+        block_output.transactions_trie = Trie(secured=False, default=None)
         block_output.receipts_trie = Trie(secured=False, default=None)
         block_output.receipt_keys = ()
         block_output.block_logs = ()
@@ -803,6 +800,12 @@ def process_transaction(
         block_output.execution_reverted = True
         return
     
+    trie_set(
+        block_output.transactions_trie,
+        rlp.encode(index),
+        encode_transaction(tx),
+    )
+
     intrinsic_gas, calldata_floor_gas_cost = calculate_intrinsic_cost(tx)
     sender = recover_sender(block_env.chain_id, tx)
     increment_nonce(block_env.state, sender)

@@ -52,7 +52,7 @@ class Header:
     ommers_hash: Hash32
     coinbase: Address
     pre_state_root: Root
-    transactions_root: Root
+    parent_transactions_root: Root
     parent_receipt_root: Root
     parent_bloom: Bloom
     difficulty: Uint

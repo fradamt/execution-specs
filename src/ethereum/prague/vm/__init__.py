@@ -60,6 +60,8 @@ class BlockOutput:
 
     block_gas_used : `ethereum.base_types.Uint`
         Gas used for executing all transactions.
+    transactions_trie : `ethereum.fork_types.Root`
+        Trie root of all the transactions in the block.
     receipts_trie : `ethereum.fork_types.Root`
         Trie root of all the receipts in the block.
     receipt_keys :
@@ -73,6 +75,9 @@ class BlockOutput:
         Whether the execution was reverted.
     """
     block_gas_used: Uint
+    transactions_trie: Trie[
+        Bytes, Optional[Union[Bytes, LegacyTransaction]]
+    ] = field(default_factory=lambda: Trie(secured=False, default=None))
     receipts_trie: Trie[Bytes, Optional[Union[Bytes, Receipt]]] = field(
         default_factory=lambda: Trie(secured=False, default=None)
     )
