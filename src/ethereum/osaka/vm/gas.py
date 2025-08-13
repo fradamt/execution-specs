@@ -69,7 +69,6 @@ GAS_INIT_CODE_WORD_COST = Uint(2)
 GAS_BLOBHASH_OPCODE = Uint(3)
 GAS_POINT_EVALUATION = Uint(50000)
 
-TARGET_BLOB_GAS_PER_BLOCK = U64(786432)
 BLOB_BASE_COST = Uint(2**13)
 BLOB_SCHEDULE_MAX = U64(9)
 BLOB_SCHEDULE_TARGET = U64(6)
@@ -308,7 +307,8 @@ def calculate_excess_blob_gas(parent_header: Header) -> U64:
         base_fee_per_gas = parent_header.base_fee_per_gas
 
     parent_blob_gas = excess_blob_gas + blob_gas_used
-    if parent_blob_gas < TARGET_BLOB_GAS_PER_BLOCK:
+    target_blob_gas = GAS_PER_BLOB * BLOB_SCHEDULE_TARGET
+    if parent_blob_gas < target_blob_gas:
         return U64(0)
 
     target_blob_gas_price = Uint(GAS_PER_BLOB)
@@ -322,7 +322,7 @@ def calculate_excess_blob_gas(parent_header: Header) -> U64:
             + blob_gas_used * blob_schedule_delta // BLOB_SCHEDULE_MAX
         )
 
-    return parent_blob_gas - TARGET_BLOB_GAS_PER_BLOCK
+    return parent_blob_gas - target_blob_gas
 
 
 def calculate_total_blob_gas(tx: Transaction) -> U64:
