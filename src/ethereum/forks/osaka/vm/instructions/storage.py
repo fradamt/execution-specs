@@ -26,9 +26,9 @@ from ..gas import (
     GAS_CALL_STIPEND,
     GAS_COLD_SLOAD,
     GAS_STORAGE_CLEAR_REFUND,
-    GAS_STORAGE_SET,
     GAS_STORAGE_UPDATE,
     GAS_WARM_ACCESS,
+    STORAGE_SET_BYTES,
     charge_gas,
 )
 from ..stack import pop, push
@@ -88,6 +88,7 @@ def sstore(evm: Evm) -> None:
     )
     current_value = get_storage(state, evm.message.current_target, key)
 
+    state_gas_storage_set = STORAGE_SET_BYTES * evm.message.block_env.state_gas_per_byte
     gas_cost = Uint(0)
 
     if (evm.message.current_target, key) not in evm.accessed_storage_keys:
@@ -96,7 +97,7 @@ def sstore(evm: Evm) -> None:
 
     if original_value == current_value and current_value != new_value:
         if original_value == 0:
-            gas_cost += GAS_STORAGE_SET
+            charge_gas(evm, state_gas_storage_set, 1)
         else:
             gas_cost += GAS_STORAGE_UPDATE - GAS_COLD_SLOAD
     else:
@@ -107,16 +108,21 @@ def sstore(evm: Evm) -> None:
         if original_value != 0 and current_value != 0 and new_value == 0:
             # Storage is cleared for the first time in the transaction
             evm.refund_counter += int(GAS_STORAGE_CLEAR_REFUND)
+            # Track state bytes cleared
+            evm.state_bytes_cleared += STORAGE_SET_BYTES
 
         if original_value != 0 and current_value == 0:
             # Gas refund issued earlier to be reversed
             evm.refund_counter -= int(GAS_STORAGE_CLEAR_REFUND)
+            evm.state_bytes_cleared -= STORAGE_SET_BYTES
 
         if original_value == new_value:
             # Storage slot being restored to its original value
             if original_value == 0:
                 # Slot was originally empty and was SET earlier
-                evm.refund_counter += int(GAS_STORAGE_SET - GAS_WARM_ACCESS)
+                # Refund the state gas that was charged for setting this storage slot
+                # Directly decrement gas_used_vector[1] since the state bytes were only used temporarily
+                evm.gas_used_vector[1] -= state_gas_storage_set
             else:
                 # Slot was originally non-empty and was UPDATED earlier
                 evm.refund_counter += int(

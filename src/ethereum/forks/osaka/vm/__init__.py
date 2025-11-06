@@ -47,6 +47,7 @@ class BlockEnvironment:
     prev_randao: Bytes32
     excess_blob_gas: U64
     parent_beacon_block_root: Hash32
+    state_gas_per_byte: Uint
 
 
 @dataclass
@@ -71,6 +72,10 @@ class BlockOutput:
         Trie root of all the withdrawals in the block.
     blob_gas_used : `ethereum.base_types.U64`
         Total blob gas used in the block.
+    state_bytes_used : `ethereum.base_types.U64`
+        Total state bytes used in the block.
+    state_bytes_cleared : `ethereum.base_types.U64`
+        Total state bytes cleared in the block.
     requests : `Bytes`
         Hash of all the requests in the block.
     """
@@ -88,6 +93,8 @@ class BlockOutput:
         default_factory=lambda: Trie(secured=False, default=None)
     )
     blob_gas_used: U64 = U64(0)
+    state_bytes_used: U64 = U64(0)
+    state_bytes_cleared: U64 = U64(0)
     requests: List[Bytes] = field(default_factory=list)
 
 
@@ -146,6 +153,7 @@ class Evm:
     valid_jump_destinations: Set[Uint]
     logs: Tuple[Log, ...]
     refund_counter: int
+    state_bytes_cleared: Uint
     running: bool
     message: Message
     output: Bytes
@@ -154,6 +162,7 @@ class Evm:
     error: Optional[EthereumException]
     accessed_addresses: Set[Address]
     accessed_storage_keys: Set[Tuple[Address, Bytes32]]
+    gas_used_vector: List[Uint]
 
 
 def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
@@ -171,9 +180,12 @@ def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
     evm.gas_left += child_evm.gas_left
     evm.logs += child_evm.logs
     evm.refund_counter += child_evm.refund_counter
+    evm.state_bytes_cleared += child_evm.state_bytes_cleared
     evm.accounts_to_delete.update(child_evm.accounts_to_delete)
     evm.accessed_addresses.update(child_evm.accessed_addresses)
     evm.accessed_storage_keys.update(child_evm.accessed_storage_keys)
+    evm.gas_used_vector[0] += child_evm.gas_used_vector[0]
+    evm.gas_used_vector[1] += child_evm.gas_used_vector[1]
 
 
 def incorporate_child_on_error(evm: Evm, child_evm: Evm) -> None:

@@ -15,15 +15,19 @@ from ethereum.exceptions import InvalidBlock, InvalidSignatureError
 from ..fork_types import Address, Authorization
 from ..state import account_exists, get_account, increment_nonce, set_code
 from ..utils.hexadecimal import hex_to_address
-from ..vm.gas import GAS_COLD_ACCOUNT_ACCESS, GAS_WARM_ACCESS
+from ..vm.gas import (
+    GAS_COLD_ACCOUNT_ACCESS,
+    GAS_WARM_ACCESS,
+    NEW_ACCOUNT_BYTES,
+    PER_AUTH_BASE_BYTES,
+)
 from . import Evm, Message
 
 SET_CODE_TX_MAGIC = b"\x05"
 EOA_DELEGATION_MARKER = b"\xef\x01\x00"
 EOA_DELEGATION_MARKER_LENGTH = len(EOA_DELEGATION_MARKER)
 EOA_DELEGATED_CODE_LENGTH = 23
-PER_EMPTY_ACCOUNT_COST = 25000
-PER_AUTH_BASE_COST = 12500
+
 NULL_ADDRESS = hex_to_address("0x0000000000000000000000000000000000000000")
 
 
@@ -149,7 +153,7 @@ def access_delegation(
     return True, address, code, access_gas_cost
 
 
-def set_delegation(message: Message) -> U256:
+def set_delegation(message: Message) -> Uint:
     """
     Set the delegation code for the authorities in the message.
 
@@ -161,13 +165,13 @@ def set_delegation(message: Message) -> U256:
         External items required for EVM execution.
 
     Returns
-    -------
-    refund_counter: `U256`
-        Refund from authority which already exists in state.
-
+    ------- 
+    state_bytes_cleared: `Uint`
+        State bytes cleared (rather, not created) by delegating to
+        existing accounts, in comparison to the intrinsic bytes estimate.
     """
     state = message.block_env.state
-    refund_counter = U256(0)
+    state_bytes_cleared = Uint(0)
     for auth in message.tx_env.authorizations:
         if auth.chain_id not in (message.block_env.chain_id, U256(0)):
             continue
@@ -193,7 +197,8 @@ def set_delegation(message: Message) -> U256:
             continue
 
         if account_exists(state, authority):
-            refund_counter += U256(PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST)
+            # For existing accounts, only PER_AUTH_BASE_BYTES are created (the code itself)
+            state_bytes_cleared += NEW_ACCOUNT_BYTES - PER_AUTH_BASE_BYTES
 
         if auth.address == NULL_ADDRESS:
             code_to_set = b""
@@ -208,4 +213,4 @@ def set_delegation(message: Message) -> U256:
 
     message.code = get_account(state, message.code_address).code
 
-    return refund_counter
+    return state_bytes_cleared

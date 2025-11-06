@@ -242,6 +242,32 @@ class Header:
     [SHA2-256]: https://en.wikipedia.org/wiki/SHA-2
     """
 
+    state_bytes_used: U64
+    """
+    Total amount of state bytes created by the transactions within this block.
+    Introduced in [EIP-8075].
+
+    [EIP-8075]: https://eips.ethereum.org/EIPS/eip-8075
+    """
+
+    state_bytes_cleared: U64
+    """
+    Total amount of state bytes cleared by the transactions within this block.
+    Introduced in [EIP-8075].
+
+    [EIP-8075]: https://eips.ethereum.org/EIPS/eip-8075
+    """
+
+    excess_state_bytes: U64
+    """
+    Running total of state bytes created in excess of the target, prior to this
+    block. Blocks with above-target state bytes creation increase this value,
+    while blocks with below-target state bytes creation decrease it (to a
+    minimum of zero). Introduced in [EIP-8075].
+
+    [EIP-8075]: https://eips.ethereum.org/EIPS/eip-8075
+    """
+
 
 @slotted_freezable
 @dataclass

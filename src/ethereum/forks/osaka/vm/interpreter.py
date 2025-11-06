@@ -12,7 +12,7 @@ A straightforward interpreter that executes EVM code.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Set, Tuple
+from typing import Optional, Set, Tuple, List
 
 from ethereum_types.bytes import Bytes, Bytes0
 from ethereum_types.numeric import U256, Uint, ulen
@@ -46,7 +46,7 @@ from ..state import (
 )
 from ..vm import Message
 from ..vm.eoa_delegation import get_delegated_code_address, set_delegation
-from ..vm.gas import GAS_CODE_DEPOSIT, charge_gas
+from ..vm.gas import CODE_DEPOSIT_BYTES, charge_gas
 from ..vm.precompiled_contracts.mapping import PRE_COMPILED_CONTRACTS
 from . import Evm
 from .exceptions import (
@@ -75,18 +75,22 @@ class MessageCallOutput:
 
           1. `gas_left`: remaining gas after execution.
           2. `refund_counter`: gas to refund after execution.
-          3. `logs`: list of `Log` generated during execution.
-          4. `accounts_to_delete`: Contracts which have self-destructed.
-          5. `error`: The error from the execution if any.
-          6. `return_data`: The output of the execution.
+          3. `state_bytes_cleared`: state bytes cleared during execution (used for excess_state_bytes calculation).
+          4. `logs`: list of `Log` generated during execution.
+          5. `accounts_to_delete`: Contracts which have self-destructed.
+          6. `error`: The error from the execution if any.
+          7. `return_data`: The output of the execution.
+          8. `gas_used_vector`: List of [regular_gas_used, state_gas_used].
     """
 
     gas_left: Uint
     refund_counter: U256
+    state_bytes_cleared: Uint
     logs: Tuple[Log, ...]
     accounts_to_delete: Set[Address]
     error: Optional[EthereumException]
     return_data: Bytes
+    gas_used_vector: List[Uint]
 
 
 def process_message_call(message: Message) -> MessageCallOutput:
@@ -107,6 +111,7 @@ def process_message_call(message: Message) -> MessageCallOutput:
     """
     block_env = message.block_env
     refund_counter = U256(0)
+    state_bytes_cleared = Uint(0)
     if message.target == Bytes0(b""):
         is_collision = account_has_code_or_nonce(
             block_env.state, message.current_target
@@ -115,16 +120,19 @@ def process_message_call(message: Message) -> MessageCallOutput:
             return MessageCallOutput(
                 Uint(0),
                 U256(0),
+                Uint(0),
                 tuple(),
                 set(),
                 AddressCollision(),
                 Bytes(b""),
+                [Uint(0), Uint(0)],
             )
         else:
             evm = process_create_message(message)
     else:
         if message.tx_env.authorizations != ():
-            refund_counter += set_delegation(message)
+            state_bytes_cleared = set_delegation(message)
+            refund_counter += U256(state_bytes_cleared * message.block_env.state_gas_per_byte)
 
         delegated_address = get_delegated_code_address(message.code)
         if delegated_address is not None:
@@ -142,6 +150,7 @@ def process_message_call(message: Message) -> MessageCallOutput:
         logs = evm.logs
         accounts_to_delete = evm.accounts_to_delete
         refund_counter += U256(evm.refund_counter)
+        state_bytes_cleared += evm.state_bytes_cleared
 
     tx_end = TransactionEnd(
         int(message.gas) - int(evm.gas_left), evm.output, evm.error
@@ -151,10 +160,12 @@ def process_message_call(message: Message) -> MessageCallOutput:
     return MessageCallOutput(
         gas_left=evm.gas_left,
         refund_counter=refund_counter,
+        state_bytes_cleared=state_bytes_cleared,
         logs=logs,
         accounts_to_delete=accounts_to_delete,
         error=evm.error,
         return_data=evm.output,
+        gas_used_vector=evm.gas_used_vector,
     )
 
 
@@ -197,12 +208,12 @@ def process_create_message(message: Message) -> Evm:
     evm = process_message(message)
     if not evm.error:
         contract_code = evm.output
-        contract_code_gas = Uint(len(contract_code)) * GAS_CODE_DEPOSIT
         try:
             if len(contract_code) > 0:
                 if contract_code[0] == 0xEF:
                     raise InvalidContractPrefix
-            charge_gas(evm, contract_code_gas)
+            code_deposit_state_gas = Uint(len(contract_code)) * CODE_DEPOSIT_BYTES * message.block_env.state_gas_per_byte
+            charge_gas(evm, code_deposit_state_gas, 1)
             if len(contract_code) > MAX_CODE_SIZE:
                 raise OutOfGasError
         except ExceptionalHalt as error:
@@ -283,6 +294,7 @@ def execute_code(message: Message) -> Evm:
         valid_jump_destinations=valid_jump_destinations,
         logs=(),
         refund_counter=0,
+        state_bytes_cleared=Uint(0),
         running=True,
         message=message,
         output=b"",
@@ -291,6 +303,7 @@ def execute_code(message: Message) -> Evm:
         error=None,
         accessed_addresses=message.accessed_addresses,
         accessed_storage_keys=message.accessed_storage_keys,
+        gas_used_vector=[Uint(0), Uint(0)],
     )
     try:
         if evm.message.code_address in PRE_COMPILED_CONTRACTS:

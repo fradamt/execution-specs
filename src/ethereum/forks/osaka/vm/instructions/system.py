@@ -42,11 +42,9 @@ from ..exceptions import OutOfGasError, Revert, WriteInStaticContext
 from ..gas import (
     GAS_CALL_VALUE,
     GAS_COLD_ACCOUNT_ACCESS,
-    GAS_CREATE,
     GAS_KECCAK256_WORD,
-    GAS_NEW_ACCOUNT,
+    NEW_ACCOUNT_BYTES,
     GAS_SELF_DESTRUCT,
-    GAS_SELF_DESTRUCT_NEW_ACCOUNT,
     GAS_WARM_ACCESS,
     GAS_ZERO,
     calculate_gas_extend_memory,
@@ -166,7 +164,9 @@ def create(evm: Evm) -> None:
     )
     init_code_gas = init_code_cost(Uint(memory_size))
 
-    charge_gas(evm, GAS_CREATE + extend_memory.cost + init_code_gas)
+    create_state_gas = NEW_ACCOUNT_BYTES * evm.message.block_env.state_gas_per_byte
+    charge_gas(evm, extend_memory.cost + init_code_gas)
+    charge_gas(evm, create_state_gas, 1)
 
     # OPERATION
     evm.memory += b"\x00" * extend_memory.expand_by
@@ -214,13 +214,14 @@ def create2(evm: Evm) -> None:
     )
     call_data_words = ceil32(Uint(memory_size)) // Uint(32)
     init_code_gas = init_code_cost(Uint(memory_size))
+    create_state_gas = NEW_ACCOUNT_BYTES * evm.message.block_env.state_gas_per_byte
     charge_gas(
         evm,
-        GAS_CREATE
-        + GAS_KECCAK256_WORD * call_data_words
+        GAS_KECCAK256_WORD * call_data_words
         + extend_memory.cost
         + init_code_gas,
     )
+    charge_gas(evm, create_state_gas, 1)
 
     # OPERATION
     evm.memory += b"\x00" * extend_memory.expand_by
@@ -388,18 +389,19 @@ def call(evm: Evm) -> None:
     ) = access_delegation(evm, code_address)
     access_gas_cost += delegated_access_gas_cost
 
-    create_gas_cost = GAS_NEW_ACCOUNT
-    if value == 0 or is_account_alive(evm.message.block_env.state, to):
-        create_gas_cost = Uint(0)
+    create_gas_cost = Uint(0)
+    if value != 0 and not is_account_alive(evm.message.block_env.state, to):
+        create_gas_cost = NEW_ACCOUNT_BYTES * evm.message.block_env.state_gas_per_byte
     transfer_gas_cost = Uint(0) if value == 0 else GAS_CALL_VALUE
     message_call_gas = calculate_message_call_gas(
         value,
         gas,
         Uint(evm.gas_left),
         extend_memory.cost,
-        access_gas_cost + create_gas_cost + transfer_gas_cost,
+        access_gas_cost + transfer_gas_cost + create_gas_cost,
     )
-    charge_gas(evm, message_call_gas.cost + extend_memory.cost)
+    charge_gas(evm, message_call_gas.cost + extend_memory.cost - create_gas_cost)
+    charge_gas(evm, create_gas_cost, 1)
     if evm.message.is_static and value != U256(0):
         raise WriteInStaticContext
     evm.memory += b"\x00" * extend_memory.expand_by
@@ -531,11 +533,12 @@ def selfdestruct(evm: Evm) -> None:
     beneficiary = to_address_masked(pop(evm.stack))
 
     # GAS
-    gas_cost = GAS_SELF_DESTRUCT
+    regular_gas = GAS_SELF_DESTRUCT
     if beneficiary not in evm.accessed_addresses:
         evm.accessed_addresses.add(beneficiary)
-        gas_cost += GAS_COLD_ACCOUNT_ACCESS
+        regular_gas += GAS_COLD_ACCOUNT_ACCESS
 
+    state_gas = Uint(0)
     if (
         not is_account_alive(evm.message.block_env.state, beneficiary)
         and get_account(
@@ -543,9 +546,10 @@ def selfdestruct(evm: Evm) -> None:
         ).balance
         != 0
     ):
-        gas_cost += GAS_SELF_DESTRUCT_NEW_ACCOUNT
+        state_gas = NEW_ACCOUNT_BYTES * evm.message.block_env.state_gas_per_byte
 
-    charge_gas(evm, gas_cost)
+    charge_gas(evm, regular_gas)
+    charge_gas(evm, state_gas, 1)
     if evm.message.is_static:
         raise WriteInStaticContext
 
