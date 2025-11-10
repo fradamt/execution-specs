@@ -285,8 +285,9 @@ def state_transition(chain: BlockChain, block: Block) -> None:
 def calculate_base_fee_per_gas(
     block_gas_limit: Uint,
     parent_gas_limit: Uint,
-    parent_gas_used: Uint,
+    parent_regular_gas_used: Uint,
     parent_base_fee_per_gas: Uint,
+    parent_state_bytes_used: U64,
 ) -> Uint:
     """
     Calculates the base fee per gas for the block.
@@ -297,10 +298,12 @@ def calculate_base_fee_per_gas(
         Gas limit of the block for which the base fee is being calculated.
     parent_gas_limit :
         Gas limit of the parent block.
-    parent_gas_used :
-        Gas used in the parent block.
+    parent_regular_gas_used :
+        Regular gas used in the parent block.
     parent_base_fee_per_gas :
         Base fee per gas of the parent block.
+    parent_state_bytes_used :
+        State bytes used in the parent block.
 
     Returns
     -------
@@ -312,11 +315,17 @@ def calculate_base_fee_per_gas(
     if not check_gas_limit(block_gas_limit, parent_gas_limit):
         raise InvalidBlock
 
-    if parent_gas_used == parent_gas_target:
+    normalized_state_gas_used = (
+        parent_gas_limit * Uint(parent_state_bytes_used) // Uint(MAX_STATE_BYTES_PER_BLOCK)
+    )
+    # Calculate total gas used combining regular gas and normalized state gas
+    parent_gas_used = parent_regular_gas_used + normalized_state_gas_used
+    
+    if parent_gas_used == parent_gas_limit:
         expected_base_fee_per_gas = parent_base_fee_per_gas
-    elif parent_gas_used > parent_gas_target:
-        gas_used_delta = parent_gas_used - parent_gas_target
-
+    elif parent_gas_used > parent_gas_limit:
+        gas_used_delta = (parent_gas_used - parent_gas_limit) // 2
+        
         parent_fee_gas_delta = parent_base_fee_per_gas * gas_used_delta
         target_fee_gas_delta = parent_fee_gas_delta // parent_gas_target
 
@@ -329,8 +338,9 @@ def calculate_base_fee_per_gas(
             parent_base_fee_per_gas + base_fee_per_gas_delta
         )
     else:
-        gas_used_delta = parent_gas_target - parent_gas_used
-
+        # Base fee decreases when total_gas_used < parent_gas_limit
+        gas_used_delta = (parent_gas_limit - parent_gas_used) // Uint(2)
+        
         parent_fee_gas_delta = parent_base_fee_per_gas * gas_used_delta
         target_fee_gas_delta = parent_fee_gas_delta // parent_gas_target
 
@@ -388,6 +398,7 @@ def validate_header(chain: BlockChain, header: Header) -> None:
         parent_header.gas_limit,
         parent_header.gas_used,
         parent_header.base_fee_per_gas,
+        parent_header.state_bytes_used,
     )
     if expected_base_fee_per_gas != header.base_fee_per_gas:
         raise InvalidBlock
@@ -1091,3 +1102,4 @@ def check_gas_limit(gas_limit: Uint, parent_gas_limit: Uint) -> bool:
         return False
 
     return True
+
