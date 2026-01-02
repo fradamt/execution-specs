@@ -252,12 +252,12 @@ def state_transition(chain: BlockChain, block: Block) -> None:
     requests_hash = compute_requests_hash(block_output.requests)
 
     # Header gas_used is the max of regular gas and state gas (EIP-8011)
-    block_gas_used_for_header = max(
-        block_output.block_gas_used, block_output.block_state_gas_used
+    block_gas_used = max(
+        block_output.block_regular_gas_used, block_output.block_state_gas_used
     )
-    if block_gas_used_for_header != block.header.gas_used:
+    if block_gas_used != block.header.gas_used:
         raise InvalidBlock(
-            f"{block_gas_used_for_header} != {block.header.gas_used}"
+            f"{block_gas_used} != {block.header.gas_used}"
         )
     if transactions_root != block.header.transactions_root:
         raise InvalidBlock
@@ -465,7 +465,7 @@ def check_transaction(
 
     """
     # Both regular gas and state gas have their own limits (both can use up to block_gas_limit)
-    regular_gas_available = block_env.block_gas_limit - block_output.block_gas_used
+    regular_gas_available = block_env.block_gas_limit - block_output.block_regular_gas_used
     state_gas_available = block_env.block_gas_limit - block_output.block_state_gas_used
     blob_gas_available = MAX_BLOB_GAS_PER_BLOCK - block_output.blob_gas_used
 
@@ -998,7 +998,7 @@ def process_transaction(
 
     # Accumulate regular gas (intrinsic + execution)
     regular_gas_used = intrinsic_regular_gas + tx_output.gas_used[GasType.REGULAR]
-    block_output.block_gas_used += regular_gas_used
+    block_output.block_regular_gas_used += regular_gas_used
 
     # Accumulate state gas (intrinsic + execution)
     state_gas_used = intrinsic_state_gas + tx_output.gas_used[GasType.STATE]
@@ -1007,7 +1007,7 @@ def process_transaction(
     block_output.blob_gas_used += tx_blob_gas_used
 
     # For receipt, use the total gas used (regular + state) after refund
-    cumulative_gas_used = block_output.block_gas_used + block_output.block_state_gas_used
+    cumulative_gas_used = block_output.block_regular_gas_used + block_output.block_state_gas_used
     receipt = make_receipt(
         tx, tx_output.error, cumulative_gas_used, tx_output.logs
     )

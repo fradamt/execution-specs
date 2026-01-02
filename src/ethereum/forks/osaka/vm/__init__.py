@@ -70,7 +70,7 @@ class BlockOutput:
 
     Contains the following:
 
-    block_gas_used : `ethereum.base_types.Uint`
+    block_regular_gas_used : `ethereum.base_types.Uint`
         Regular gas used for executing all transactions.
     block_state_gas_used : `ethereum.base_types.Uint`
         State gas used for executing all transactions.
@@ -91,7 +91,7 @@ class BlockOutput:
         Hash of all the requests in the block.
     """
 
-    block_gas_used: Uint = Uint(0)
+    block_regular_gas_used: Uint = Uint(0)
     block_state_gas_used: Uint = Uint(0)
     transactions_trie: Trie[Bytes, Optional[Bytes | LegacyTransaction]] = (
         field(default_factory=lambda: Trie(secured=False, default=None))
