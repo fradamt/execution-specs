@@ -56,6 +56,7 @@ from .state import (
     destroy_account,
     get_account,
     increment_nonce,
+    is_account_alive,
     modify_state,
     set_account_balance,
     state_root,
@@ -884,9 +885,19 @@ def process_transaction(
         encode_transaction(tx),
     )
 
-    intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost = (
-        validate_transaction(tx, block_env.state_gas_per_byte)
+    # EIP-2780: Check if this is a value transfer that will create a new account
+    sending_value_to_new_account = (
+        isinstance(tx.to, Address)
+        and tx.value > 0
+        and not is_account_alive(block_env.state, tx.to)
     )
+
+    intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost = (
+        validate_transaction(
+            tx, block_env.state_gas_per_byte, sending_value_to_new_account
+        )
+    )
+
     intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
 
     (

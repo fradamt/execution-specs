@@ -521,7 +521,7 @@ def decode_transaction(tx: LegacyTransaction | Bytes) -> Transaction:
 
 
 def validate_transaction(
-    tx: Transaction, state_gas_per_byte: Uint
+    tx: Transaction, state_gas_per_byte: Uint, sending_value_to_new_account: bool
 ) -> Tuple[Uint, Uint, Uint]:
     """
     Verifies a transaction.
@@ -555,7 +555,9 @@ def validate_transaction(
     from .vm.interpreter import MAX_INIT_CODE_SIZE
 
     intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost = (
-        calculate_intrinsic_cost(tx, state_gas_per_byte)
+        calculate_intrinsic_cost(
+            tx, state_gas_per_byte, sending_value_to_new_account
+        )
     )
     intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
     if max(intrinsic_gas, calldata_floor_gas_cost) > tx.gas:
@@ -574,7 +576,7 @@ def validate_transaction(
 
 
 def calculate_intrinsic_cost(
-    tx: Transaction, state_gas_per_byte: Uint
+    tx: Transaction, state_gas_per_byte: Uint, sending_value_to_new_account: bool
 ) -> Tuple[Uint, Uint, Uint]:
     """
     Calculates the gas that is charged before execution is started.
@@ -620,6 +622,11 @@ def calculate_intrinsic_cost(
     if tx.to == Bytes0(b""):
         create_state_gas = NEW_ACCOUNT_BYTES * state_gas_per_byte
         create_regular_gas = init_code_cost(ulen(tx.data))
+    elif sending_value_to_new_account:
+        # EIP-2780: Charge for new account creation when sending value to
+        # fresh EOA. This prevents bypassing GAS_NEW_ACCOUNT by first sending
+        # a cheap ETH transfer.
+        create_state_gas = NEW_ACCOUNT_BYTES * state_gas_per_byte
 
     access_list_gas = Uint(0)
     if isinstance(
