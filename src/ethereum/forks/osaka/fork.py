@@ -76,7 +76,7 @@ from .transactions import (
 from .trie import root, trie_set
 from .utils.hexadecimal import hex_to_address
 from .utils.message import prepare_message
-from .vm import Message
+from .vm import GasType, Message
 from .vm.eoa_delegation import is_valid_delegation
 from .vm.gas import (
     BLOB_SCHEDULE_MAX,
@@ -997,11 +997,11 @@ def process_transaction(
         destroy_account(block_env.state, address)
 
     # Accumulate regular gas (intrinsic + execution)
-    regular_gas_used = intrinsic_regular_gas + tx_output.gas_used_vector[0]
+    regular_gas_used = intrinsic_regular_gas + tx_output.gas_used[GasType.REGULAR]
     block_output.block_gas_used += regular_gas_used
 
     # Accumulate state gas (intrinsic + execution)
-    state_gas_used = intrinsic_state_gas + tx_output.gas_used_vector[1]
+    state_gas_used = intrinsic_state_gas + tx_output.gas_used[GasType.STATE]
     block_output.block_state_gas_used += state_gas_used
 
     block_output.blob_gas_used += tx_blob_gas_used

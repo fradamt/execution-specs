@@ -12,14 +12,27 @@ The abstract computer which runs the code stored in an
 `.fork_types.Account`.
 """
 
+import enum
 from dataclasses import dataclass, field
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ethereum_types.bytes import Bytes, Bytes0, Bytes32
 from ethereum_types.numeric import U64, U256, Uint
 
 from ethereum.crypto.hash import Hash32
 from ethereum.exceptions import EthereumException
+
+
+class GasType(enum.Enum):
+    """
+    Type of gas being charged. Used for multidimensional gas metering.
+
+    REGULAR: Standard execution gas (opcodes, memory, etc.)
+    STATE: State growth gas (account creation, storage set, code deposit)
+    """
+
+    REGULAR = 0
+    STATE = 1
 
 from ..blocks import Log, Receipt, Withdrawal
 from ..fork_types import Address, Authorization, VersionedHash
@@ -158,7 +171,7 @@ class Evm:
     error: Optional[EthereumException]
     accessed_addresses: Set[Address]
     accessed_storage_keys: Set[Tuple[Address, Bytes32]]
-    gas_used_vector: List[Uint]
+    gas_used: Dict[GasType, Uint]
 
 
 def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
@@ -179,8 +192,8 @@ def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
     evm.accounts_to_delete.update(child_evm.accounts_to_delete)
     evm.accessed_addresses.update(child_evm.accessed_addresses)
     evm.accessed_storage_keys.update(child_evm.accessed_storage_keys)
-    evm.gas_used_vector[0] += child_evm.gas_used_vector[0]
-    evm.gas_used_vector[1] += child_evm.gas_used_vector[1]
+    for gas_type in GasType:
+        evm.gas_used[gas_type] += child_evm.gas_used[gas_type]
 
 
 def incorporate_child_on_error(evm: Evm, child_evm: Evm) -> None:

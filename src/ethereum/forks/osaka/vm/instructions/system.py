@@ -34,6 +34,7 @@ from ...utils.address import (
 from ...vm.eoa_delegation import access_delegation
 from .. import (
     Evm,
+    GasType,
     Message,
     incorporate_child_on_error,
     incorporate_child_on_success,
@@ -166,7 +167,7 @@ def create(evm: Evm) -> None:
 
     create_state_gas = NEW_ACCOUNT_BYTES * evm.message.block_env.state_gas_per_byte
     charge_gas(evm, extend_memory.cost + init_code_gas)
-    charge_gas(evm, create_state_gas, 1)
+    charge_gas(evm, create_state_gas, GasType.STATE)
 
     # OPERATION
     evm.memory += b"\x00" * extend_memory.expand_by
@@ -221,7 +222,7 @@ def create2(evm: Evm) -> None:
         + extend_memory.cost
         + init_code_gas,
     )
-    charge_gas(evm, create_state_gas, 1)
+    charge_gas(evm, create_state_gas, GasType.STATE)
 
     # OPERATION
     evm.memory += b"\x00" * extend_memory.expand_by
@@ -401,7 +402,7 @@ def call(evm: Evm) -> None:
         access_gas_cost + transfer_gas_cost + create_gas_cost,
     )
     charge_gas(evm, message_call_gas.cost + extend_memory.cost - create_gas_cost)
-    charge_gas(evm, create_gas_cost, 1)
+    charge_gas(evm, create_gas_cost, GasType.STATE)
     if evm.message.is_static and value != U256(0):
         raise WriteInStaticContext
     evm.memory += b"\x00" * extend_memory.expand_by
@@ -549,7 +550,7 @@ def selfdestruct(evm: Evm) -> None:
         state_gas = NEW_ACCOUNT_BYTES * evm.message.block_env.state_gas_per_byte
 
     charge_gas(evm, regular_gas)
-    charge_gas(evm, state_gas, 1)
+    charge_gas(evm, state_gas, GasType.STATE)
     if evm.message.is_static:
         raise WriteInStaticContext
 

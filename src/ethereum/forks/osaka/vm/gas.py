@@ -21,7 +21,7 @@ from ethereum.utils.numeric import ceil32, taylor_exponential
 
 from ..blocks import Header
 from ..transactions import BlobTransaction, Transaction
-from . import Evm
+from . import Evm, GasType
 from .exceptions import OutOfGasError
 
 GAS_JUMPDEST = Uint(1)
@@ -123,10 +123,12 @@ class MessageCallGas:
     sub_call: Uint
 
 
-def charge_gas(evm: Evm, amount: Uint, gas_type: int = 0) -> None:
+def charge_gas(
+    evm: Evm, amount: Uint, gas_type: GasType = GasType.REGULAR
+) -> None:
     """
-    Subtracts `amount` from `evm.gas_left` and updates gas usage in the specified
-    element of `gas_used_vector`.
+    Subtracts `amount` from `evm.gas_left` and updates gas usage in the
+    corresponding element of `gas_used_vector`.
 
     Parameters
     ----------
@@ -135,8 +137,7 @@ def charge_gas(evm: Evm, amount: Uint, gas_type: int = 0) -> None:
     amount :
         The amount of gas the current operation requires.
     gas_type :
-        Index into `gas_used_vector` (0 for regular gas, 1 for state gas).
-        Defaults to 0 (regular gas).
+        The type of gas being charged. Defaults to REGULAR.
 
     """
     evm_trace(evm, GasAndRefund(int(amount)))
@@ -145,7 +146,7 @@ def charge_gas(evm: Evm, amount: Uint, gas_type: int = 0) -> None:
         raise OutOfGasError
     else:
         evm.gas_left -= amount
-        evm.gas_used_vector[gas_type] += amount
+        evm.gas_used[gas_type] += amount
 
 
 def calculate_memory_gas_cost(size_in_bytes: Uint) -> Uint:
