@@ -996,8 +996,9 @@ def process_transaction(
     for address in tx_output.accounts_to_delete:
         destroy_account(block_env.state, address)
 
-    # Accumulate regular gas (intrinsic + execution)
+    # Accumulate regular gas (intrinsic + execution), applying EIP-7623 floor
     regular_gas_used = intrinsic_regular_gas + tx_output.gas_used[GasType.REGULAR]
+    regular_gas_used = max(regular_gas_used, calldata_floor_gas_cost)
     block_output.block_regular_gas_used += regular_gas_used
 
     # Accumulate state gas (intrinsic + execution)
