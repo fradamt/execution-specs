@@ -18,6 +18,7 @@ from ethereum_types.bytes import Bytes, Bytes0
 from ethereum_types.numeric import U256, Uint, ulen
 
 from ethereum.exceptions import EthereumException
+from ethereum.utils.numeric import ceil32
 from ethereum.trace import (
     EvmStop,
     OpEnd,
@@ -46,7 +47,7 @@ from ..state import (
 )
 from ..vm import GasType, Message
 from ..vm.eoa_delegation import get_delegated_code_address, set_delegation
-from ..vm.gas import CODE_DEPOSIT_BYTES, charge_gas
+from ..vm.gas import CODE_DEPOSIT_BYTES, GAS_KECCAK256_WORD, charge_gas
 from ..vm.precompiled_contracts.mapping import PRE_COMPILED_CONTRACTS
 from . import Evm
 from .exceptions import (
@@ -207,6 +208,9 @@ def process_create_message(message: Message) -> Evm:
                     raise InvalidContractPrefix
             code_deposit_state_gas = Uint(len(contract_code)) * CODE_DEPOSIT_BYTES * message.block_env.state_gas_per_byte
             charge_gas(evm, code_deposit_state_gas, GasType.STATE)
+            # Hash cost for computing keccak256 of deployed bytecode
+            code_hash_gas = GAS_KECCAK256_WORD * ceil32(Uint(len(contract_code))) // Uint(32)
+            charge_gas(evm, code_hash_gas)
             if len(contract_code) > MAX_CODE_SIZE:
                 raise OutOfGasError
         except ExceptionalHalt as error:
