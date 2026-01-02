@@ -153,26 +153,21 @@ def access_delegation(
     return True, address, code, access_gas_cost
 
 
-def set_delegation(message: Message) -> U256:
+def set_delegation(message: Message) -> None:
     """
     Set the delegation code for the authorities in the message.
+
+    Also adjusts intrinsic_state_gas for authorities that already exist
+    (only PER_AUTH_BASE_BYTES of state is created, not NEW_ACCOUNT_BYTES).
 
     Parameters
     ----------
     message :
         Transaction specific items.
-    env :
-        External items required for EVM execution.
-
-    Returns
-    -------
-    refund_counter: `U256`
-        Refund from authority which already exists in state (in gas units).
 
     """
     state = message.block_env.state
     state_gas_per_byte = message.block_env.state_gas_per_byte
-    refund_counter = U256(0)
     for auth in message.tx_env.authorizations:
         if auth.chain_id not in (message.block_env.chain_id, U256(0)):
             continue
@@ -199,8 +194,10 @@ def set_delegation(message: Message) -> U256:
 
         if account_exists(state, authority):
             # For existing accounts, only PER_AUTH_BASE_BYTES are created (the code itself)
-            # Refund the difference between what was charged (NEW_ACCOUNT_BYTES) and what's needed
-            refund_counter += U256((NEW_ACCOUNT_BYTES - PER_AUTH_BASE_BYTES) * state_gas_per_byte)
+            # Adjust intrinsic_state_gas to reflect actual state created
+            message.tx_env.intrinsic_state_gas -= (
+                (NEW_ACCOUNT_BYTES - PER_AUTH_BASE_BYTES) * state_gas_per_byte
+            )
 
         if auth.address == NULL_ADDRESS:
             code_to_set = b""
@@ -214,5 +211,3 @@ def set_delegation(message: Message) -> U256:
         raise InvalidBlock("Invalid type 4 transaction: no target")
 
     message.code = get_account(state, message.code_address).code
-
-    return refund_counter

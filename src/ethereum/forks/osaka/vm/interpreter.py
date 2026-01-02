@@ -128,7 +128,7 @@ def process_message_call(message: Message) -> MessageCallOutput:
             evm = process_create_message(message)
     else:
         if message.tx_env.authorizations != ():
-            refund_counter += set_delegation(message)
+            set_delegation(message)
 
         delegated_address = get_delegated_code_address(message.code)
         if delegated_address is not None:
