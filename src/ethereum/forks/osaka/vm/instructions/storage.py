@@ -118,8 +118,7 @@ def sstore(evm: Evm) -> None:
             if original_value == 0:
                 # Slot was originally empty and was SET earlier
                 # Refund the state gas that was charged for setting this storage slot
-                # Directly decrement gas_used since the state bytes were only used temporarily
-                evm.gas_used[GasType.STATE] -= state_gas_storage_set
+                evm.refund_counter += int(state_gas_storage_set)
             else:
                 # Slot was originally non-empty and was UPDATED earlier
                 evm.refund_counter += int(
