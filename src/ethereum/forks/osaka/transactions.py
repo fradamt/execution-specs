@@ -22,7 +22,6 @@ from ethereum.exceptions import (
 
 from .exceptions import (
     InitCodeTooLargeError,
-    TransactionGasLimitExceededError,
     TransactionTypeError,
 )
 from .fork_types import Address, Authorization, VersionedHash
@@ -565,8 +564,11 @@ def validate_transaction(
         raise NonceOverflowError("Nonce too high")
     if tx.to == Bytes0(b"") and len(tx.data) > MAX_INIT_CODE_SIZE:
         raise InitCodeTooLargeError("Code size too large")
-    if tx.gas > TX_MAX_GAS_LIMIT:
-        raise TransactionGasLimitExceededError("Gas limit too high")
+    # Note: TX_MAX_GAS_LIMIT is now enforced at runtime (in charge_gas) rather
+    # than at validation time. This allows transactions with tx.gas > limit
+    # to be valid, but they will revert if regular gas usage exceeds the limit.
+    # This separation enables large contract deployments where state gas is
+    # the limiting factor rather than regular gas (EIP-8037).
 
     return intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost
 

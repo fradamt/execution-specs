@@ -636,6 +636,8 @@ def process_system_transaction(
         authorizations=(),
         index_in_block=None,
         tx_hash=None,
+        intrinsic_regular_gas=Uint(0),
+        intrinsic_state_gas=Uint(0),
     )
 
     system_tx_message = Message(
@@ -949,6 +951,8 @@ def process_transaction(
         authorizations=authorizations,
         index_in_block=index,
         tx_hash=get_transaction_hash(encode_transaction(tx)),
+        intrinsic_regular_gas=intrinsic_regular_gas,
+        intrinsic_state_gas=intrinsic_state_gas,
     )
 
     message = prepare_message(block_env, tx_env, tx)
@@ -995,17 +999,15 @@ def process_transaction(
     for address in tx_output.accounts_to_delete:
         destroy_account(block_env.state, address)
 
-    # Accumulate regular gas (intrinsic + execution), applying EIP-7623 floor
-    regular_gas_used = intrinsic_regular_gas + tx_output.gas_used[GasType.REGULAR]
-    regular_gas_used = max(regular_gas_used, calldata_floor_gas_cost)
-    block_output.block_regular_gas_used += regular_gas_used
-
-    # Accumulate state gas (intrinsic + execution)
-    state_gas_used = intrinsic_state_gas + tx_output.gas_used[GasType.STATE]
-    block_output.block_state_gas_used += state_gas_used
-
+    # gas_used is now cumulative and includes intrinsic gas
+    # Apply EIP-7623 floor to regular gas
+    block_output.block_regular_gas_used += max(
+        tx_output.gas_used[GasType.REGULAR], calldata_floor_gas_cost
+    )
+    block_output.block_state_gas_used += tx_output.gas_used[GasType.STATE]
     block_output.blob_gas_used += tx_blob_gas_used
 
+    # Substitute cumulative_gas_used with tx_gas_used_after_refund
     receipt = make_receipt(
         tx, tx_output.error, tx_gas_used_after_refund, tx_output.logs
     )

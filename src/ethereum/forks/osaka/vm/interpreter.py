@@ -278,6 +278,19 @@ def execute_code(message: Message) -> Evm:
     code = message.code
     valid_jump_destinations = get_valid_jump_destinations(code)
 
+    # Initialize gas_used - cumulative from parent if there is one,
+    # otherwise start with intrinsic gas values
+    if message.parent_evm is not None:
+        initial_gas_used = {
+            gas_type: message.parent_evm.gas_used[gas_type]
+            for gas_type in GasType
+        }
+    else:
+        initial_gas_used = {
+            GasType.REGULAR: message.tx_env.intrinsic_regular_gas,
+            GasType.STATE: message.tx_env.intrinsic_state_gas,
+        }
+
     evm = Evm(
         pc=Uint(0),
         stack=[],
@@ -295,7 +308,7 @@ def execute_code(message: Message) -> Evm:
         error=None,
         accessed_addresses=message.accessed_addresses,
         accessed_storage_keys=message.accessed_storage_keys,
-        gas_used={gas_type: Uint(0) for gas_type in GasType},
+        gas_used=initial_gas_used,
     )
     try:
         if evm.message.code_address in PRE_COMPILED_CONTRACTS:

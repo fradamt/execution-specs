@@ -124,6 +124,8 @@ class TransactionEnvironment:
     authorizations: Tuple[Authorization, ...]
     index_in_block: Optional[Uint]
     tx_hash: Optional[Hash32]
+    intrinsic_regular_gas: Uint
+    intrinsic_state_gas: Uint
 
 
 @dataclass
@@ -192,8 +194,9 @@ def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
     evm.accounts_to_delete.update(child_evm.accounts_to_delete)
     evm.accessed_addresses.update(child_evm.accessed_addresses)
     evm.accessed_storage_keys.update(child_evm.accessed_storage_keys)
+    # gas_used is cumulative, so child's final values become parent's values
     for gas_type in GasType:
-        evm.gas_used[gas_type] += child_evm.gas_used[gas_type]
+        evm.gas_used[gas_type] = child_evm.gas_used[gas_type]
 
 
 def incorporate_child_on_error(evm: Evm, child_evm: Evm) -> None:
@@ -209,3 +212,7 @@ def incorporate_child_on_error(evm: Evm, child_evm: Evm) -> None:
 
     """
     evm.gas_left += child_evm.gas_left
+    # gas_used is cumulative, so child's final values become parent's values
+    # Even on error, the gas consumed by the child is still accounted for
+    for gas_type in GasType:
+        evm.gas_used[gas_type] = child_evm.gas_used[gas_type]

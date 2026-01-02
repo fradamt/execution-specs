@@ -20,7 +20,7 @@ from ethereum.trace import GasAndRefund, evm_trace
 from ethereum.utils.numeric import ceil32, taylor_exponential
 
 from ..blocks import Header
-from ..transactions import BlobTransaction, Transaction
+from ..transactions import TX_MAX_GAS_LIMIT, BlobTransaction, Transaction
 from . import Evm, GasType
 from .exceptions import OutOfGasError
 
@@ -144,9 +144,17 @@ def charge_gas(
 
     if evm.gas_left < amount:
         raise OutOfGasError
-    else:
-        evm.gas_left -= amount
-        evm.gas_used[gas_type] += amount
+
+    # Check regular gas limit (EIP-7825 runtime enforcement)
+    # Only applies to regular transactions (intrinsic_regular_gas > 0),
+    # not to system transactions
+    if gas_type == GasType.REGULAR:
+        if evm.message.tx_env.intrinsic_regular_gas > Uint(0):
+            if evm.gas_used[GasType.REGULAR] + amount > TX_MAX_GAS_LIMIT:
+                raise OutOfGasError
+
+    evm.gas_left -= amount
+    evm.gas_used[gas_type] += amount
 
 
 def calculate_memory_gas_cost(size_in_bytes: Uint) -> Uint:
