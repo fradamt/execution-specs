@@ -89,6 +89,7 @@ from .vm.gas import (
     get_state_gas_per_byte,
 )
 from .vm.interpreter import MessageCallOutput, process_message_call
+from .vm.precompiled_contracts.mapping import PRE_COMPILED_CONTRACTS
 
 BASE_FEE_MAX_CHANGE_DENOMINATOR = Uint(8)
 ELASTICITY_MULTIPLIER = Uint(2)
@@ -889,6 +890,7 @@ def process_transaction(
     sending_value_to_new_account = (
         isinstance(tx.to, Address)
         and tx.value > 0
+        and tx.to not in PRE_COMPILED_CONTRACTS
         and not is_account_alive(block_env.state, tx.to)
     )
 
