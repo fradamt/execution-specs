@@ -562,7 +562,7 @@ def check_transaction(
 def make_receipt(
     tx: Transaction,
     error: Optional[EthereumException],
-    cumulative_gas_used: Uint,
+    gas_used: Uint,
     logs: Tuple[Log, ...],
 ) -> Bytes | Receipt:
     """
@@ -574,9 +574,8 @@ def make_receipt(
         The executed transaction.
     error :
         Error in the top level frame of the transaction, if any.
-    cumulative_gas_used :
-        The total gas used so far in the block after the transaction was
-        executed.
+    gas_used :
+        The gas used by this transaction.
     logs :
         The logs produced by the transaction.
 
@@ -588,7 +587,7 @@ def make_receipt(
     """
     receipt = Receipt(
         succeeded=error is None,
-        cumulative_gas_used=cumulative_gas_used,
+        gas_used=gas_used,
         bloom=logs_bloom(logs),
         logs=logs,
     )
@@ -1007,10 +1006,8 @@ def process_transaction(
 
     block_output.blob_gas_used += tx_blob_gas_used
 
-    # For receipt, use the total gas used (regular + state) after refund
-    cumulative_gas_used = block_output.block_regular_gas_used + block_output.block_state_gas_used
     receipt = make_receipt(
-        tx, tx_output.error, cumulative_gas_used, tx_output.logs
+        tx, tx_output.error, tx_gas_used_after_refund, tx_output.logs
     )
 
     receipt_key = rlp.encode(Uint(index))
