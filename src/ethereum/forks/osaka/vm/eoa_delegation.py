@@ -15,15 +15,19 @@ from ethereum.exceptions import InvalidBlock, InvalidSignatureError
 from ..fork_types import Address, Authorization
 from ..state import account_exists, get_account, increment_nonce, set_code
 from ..utils.hexadecimal import hex_to_address
-from ..vm.gas import GAS_COLD_ACCOUNT_ACCESS, GAS_WARM_ACCESS
+from ..vm.gas import (
+    GAS_COLD_ACCOUNT_ACCESS,
+    GAS_WARM_ACCESS,
+    NEW_ACCOUNT_BYTES,
+    PER_AUTH_BASE_BYTES,
+)
 from . import Evm, Message
 
 SET_CODE_TX_MAGIC = b"\x05"
 EOA_DELEGATION_MARKER = b"\xef\x01\x00"
 EOA_DELEGATION_MARKER_LENGTH = len(EOA_DELEGATION_MARKER)
 EOA_DELEGATED_CODE_LENGTH = 23
-PER_EMPTY_ACCOUNT_COST = 25000
-PER_AUTH_BASE_COST = 12500
+
 NULL_ADDRESS = hex_to_address("0x0000000000000000000000000000000000000000")
 
 
@@ -163,10 +167,11 @@ def set_delegation(message: Message) -> U256:
     Returns
     -------
     refund_counter: `U256`
-        Refund from authority which already exists in state.
+        Refund from authority which already exists in state (in gas units).
 
     """
     state = message.block_env.state
+    state_gas_per_byte = message.block_env.state_gas_per_byte
     refund_counter = U256(0)
     for auth in message.tx_env.authorizations:
         if auth.chain_id not in (message.block_env.chain_id, U256(0)):
@@ -193,7 +198,9 @@ def set_delegation(message: Message) -> U256:
             continue
 
         if account_exists(state, authority):
-            refund_counter += U256(PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST)
+            # For existing accounts, only PER_AUTH_BASE_BYTES are created (the code itself)
+            # Refund the difference between what was charged (NEW_ACCOUNT_BYTES) and what's needed
+            refund_counter += U256((NEW_ACCOUNT_BYTES - PER_AUTH_BASE_BYTES) * state_gas_per_byte)
 
         if auth.address == NULL_ADDRESS:
             code_to_set = b""

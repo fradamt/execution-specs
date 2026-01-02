@@ -47,6 +47,7 @@ class BlockEnvironment:
     prev_randao: Bytes32
     excess_blob_gas: U64
     parent_beacon_block_root: Hash32
+    state_gas_per_byte: Uint
 
 
 @dataclass
@@ -57,7 +58,9 @@ class BlockOutput:
     Contains the following:
 
     block_gas_used : `ethereum.base_types.Uint`
-        Gas used for executing all transactions.
+        Regular gas used for executing all transactions.
+    block_state_gas_used : `ethereum.base_types.Uint`
+        State gas used for executing all transactions.
     transactions_trie : `ethereum.fork_types.Root`
         Trie of all the transactions in the block.
     receipts_trie : `ethereum.fork_types.Root`
@@ -76,6 +79,7 @@ class BlockOutput:
     """
 
     block_gas_used: Uint = Uint(0)
+    block_state_gas_used: Uint = Uint(0)
     transactions_trie: Trie[Bytes, Optional[Bytes | LegacyTransaction]] = (
         field(default_factory=lambda: Trie(secured=False, default=None))
     )
@@ -154,6 +158,7 @@ class Evm:
     error: Optional[EthereumException]
     accessed_addresses: Set[Address]
     accessed_storage_keys: Set[Tuple[Address, Bytes32]]
+    gas_used_vector: List[Uint]
 
 
 def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
@@ -174,6 +179,8 @@ def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
     evm.accounts_to_delete.update(child_evm.accounts_to_delete)
     evm.accessed_addresses.update(child_evm.accessed_addresses)
     evm.accessed_storage_keys.update(child_evm.accessed_storage_keys)
+    evm.gas_used_vector[0] += child_evm.gas_used_vector[0]
+    evm.gas_used_vector[1] += child_evm.gas_used_vector[1]
 
 
 def incorporate_child_on_error(evm: Evm, child_evm: Evm) -> None:

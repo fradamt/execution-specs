@@ -85,6 +85,7 @@ from .vm.gas import (
     calculate_data_fee,
     calculate_excess_blob_gas,
     calculate_total_blob_gas,
+    get_state_gas_per_byte,
 )
 from .vm.interpreter import MessageCallOutput, process_message_call
 
@@ -221,6 +222,8 @@ def state_transition(chain: BlockChain, block: Block) -> None:
     if block.ommers != ():
         raise InvalidBlock
 
+    state_gas_per_byte = get_state_gas_per_byte(block.header.gas_limit)
+
     block_env = vm.BlockEnvironment(
         chain_id=chain.chain_id,
         state=chain.state,
@@ -233,6 +236,7 @@ def state_transition(chain: BlockChain, block: Block) -> None:
         prev_randao=block.header.prev_randao,
         excess_blob_gas=block.header.excess_blob_gas,
         parent_beacon_block_root=block.header.parent_beacon_block_root,
+        state_gas_per_byte=state_gas_per_byte,
     )
 
     block_output = apply_body(
@@ -247,9 +251,13 @@ def state_transition(chain: BlockChain, block: Block) -> None:
     withdrawals_root = root(block_output.withdrawals_trie)
     requests_hash = compute_requests_hash(block_output.requests)
 
-    if block_output.block_gas_used != block.header.gas_used:
+    # Header gas_used is the max of regular gas and state gas (EIP-8011)
+    block_gas_used_for_header = max(
+        block_output.block_gas_used, block_output.block_state_gas_used
+    )
+    if block_gas_used_for_header != block.header.gas_used:
         raise InvalidBlock(
-            f"{block_output.block_gas_used} != {block.header.gas_used}"
+            f"{block_gas_used_for_header} != {block.header.gas_used}"
         )
     if transactions_root != block.header.transactions_root:
         raise InvalidBlock
@@ -456,11 +464,16 @@ def check_transaction(
         is empty.
 
     """
-    gas_available = block_env.block_gas_limit - block_output.block_gas_used
+    # Both regular gas and state gas have their own limits (both can use up to block_gas_limit)
+    regular_gas_available = block_env.block_gas_limit - block_output.block_gas_used
+    state_gas_available = block_env.block_gas_limit - block_output.block_state_gas_used
     blob_gas_available = MAX_BLOB_GAS_PER_BLOCK - block_output.blob_gas_used
 
-    if tx.gas > gas_available:
-        raise GasUsedExceedsLimitError("gas used exceeds limit")
+    # Transaction gas must fit within both resource limits
+    if tx.gas > regular_gas_available:
+        raise GasUsedExceedsLimitError("regular gas used exceeds limit")
+    if tx.gas > state_gas_available:
+        raise GasUsedExceedsLimitError("state gas used exceeds limit")
 
     tx_blob_gas_used = calculate_total_blob_gas(tx)
     if tx_blob_gas_used > blob_gas_available:
@@ -870,7 +883,10 @@ def process_transaction(
         encode_transaction(tx),
     )
 
-    intrinsic_gas, calldata_floor_gas_cost = validate_transaction(tx)
+    intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost = (
+        validate_transaction(tx, block_env.state_gas_per_byte)
+    )
+    intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
 
     (
         sender,
@@ -980,11 +996,20 @@ def process_transaction(
     for address in tx_output.accounts_to_delete:
         destroy_account(block_env.state, address)
 
-    block_output.block_gas_used += tx_gas_used_after_refund
+    # Accumulate regular gas (intrinsic + execution)
+    regular_gas_used = intrinsic_regular_gas + tx_output.gas_used_vector[0]
+    block_output.block_gas_used += regular_gas_used
+
+    # Accumulate state gas (intrinsic + execution)
+    state_gas_used = intrinsic_state_gas + tx_output.gas_used_vector[1]
+    block_output.block_state_gas_used += state_gas_used
+
     block_output.blob_gas_used += tx_blob_gas_used
 
+    # For receipt, use the total gas used (regular + state) after refund
+    cumulative_gas_used = block_output.block_gas_used + block_output.block_state_gas_used
     receipt = make_receipt(
-        tx, tx_output.error, block_output.block_gas_used, tx_output.logs
+        tx, tx_output.error, cumulative_gas_used, tx_output.logs
     )
 
     receipt_key = rlp.encode(Uint(index))

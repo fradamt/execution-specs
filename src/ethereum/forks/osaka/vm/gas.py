@@ -27,7 +27,6 @@ from .exceptions import OutOfGasError
 GAS_JUMPDEST = Uint(1)
 GAS_BASE = Uint(2)
 GAS_VERY_LOW = Uint(3)
-GAS_STORAGE_SET = Uint(20000)
 GAS_STORAGE_UPDATE = Uint(5000)
 GAS_STORAGE_CLEAR_REFUND = Uint(4800)
 GAS_LOW = Uint(5)
@@ -43,14 +42,11 @@ GAS_BLOCK_HASH = Uint(20)
 GAS_LOG = Uint(375)
 GAS_LOG_DATA = Uint(8)
 GAS_LOG_TOPIC = Uint(375)
-GAS_CREATE = Uint(32000)
 GAS_CODE_DEPOSIT = Uint(200)
 GAS_ZERO = Uint(0)
-GAS_NEW_ACCOUNT = Uint(25000)
 GAS_CALL_VALUE = Uint(9000)
 GAS_CALL_STIPEND = Uint(2300)
 GAS_SELF_DESTRUCT = Uint(5000)
-GAS_SELF_DESTRUCT_NEW_ACCOUNT = Uint(25000)
 GAS_ECRECOVER = Uint(3000)
 GAS_P256VERIFY = Uint(6900)
 GAS_SHA256 = Uint(60)
@@ -76,6 +72,15 @@ BLOB_BASE_COST = Uint(2**13)
 BLOB_SCHEDULE_MAX = U64(9)
 MIN_BLOB_GASPRICE = Uint(1)
 BLOB_BASE_FEE_UPDATE_FRACTION = Uint(5007716)
+
+# State gas constants (State Growth EIP)
+TARGET_STATE_BYTES_PER_BLOCK = Uint(45_000)
+
+# State byte constants (EIP-8037 harmonization)
+CODE_DEPOSIT_BYTES = Uint(1)
+NEW_ACCOUNT_BYTES = Uint(112)
+STORAGE_SET_BYTES = Uint(32)
+PER_AUTH_BASE_BYTES = Uint(23)
 
 GAS_BLS_G1_ADD = Uint(375)
 GAS_BLS_G1_MUL = Uint(12000)
@@ -118,9 +123,10 @@ class MessageCallGas:
     sub_call: Uint
 
 
-def charge_gas(evm: Evm, amount: Uint) -> None:
+def charge_gas(evm: Evm, amount: Uint, gas_type: int = 0) -> None:
     """
-    Subtracts `amount` from `evm.gas_left`.
+    Subtracts `amount` from `evm.gas_left` and updates gas usage in the specified
+    element of `gas_used_vector`.
 
     Parameters
     ----------
@@ -128,6 +134,9 @@ def charge_gas(evm: Evm, amount: Uint) -> None:
         The current EVM.
     amount :
         The amount of gas the current operation requires.
+    gas_type :
+        Index into `gas_used_vector` (0 for regular gas, 1 for state gas).
+        Defaults to 0 (regular gas).
 
     """
     evm_trace(evm, GasAndRefund(int(amount)))
@@ -136,6 +145,7 @@ def charge_gas(evm: Evm, amount: Uint) -> None:
         raise OutOfGasError
     else:
         evm.gas_left -= amount
+        evm.gas_used_vector[gas_type] += amount
 
 
 def calculate_memory_gas_cost(size_in_bytes: Uint) -> Uint:
@@ -394,3 +404,25 @@ def calculate_data_fee(excess_blob_gas: U64, tx: Transaction) -> Uint:
     return Uint(calculate_total_blob_gas(tx)) * calculate_blob_gas_price(
         excess_blob_gas
     )
+
+
+def get_state_gas_per_byte(gas_limit: Uint) -> Uint:
+    """
+    Calculate the state gas per byte for a block based on the gas limit.
+
+    The `state_gas_per_byte` is set such that `TARGET_STATE_BYTES_PER_BLOCK`
+    will be created at the given block gas limit when `state_gas` is the most
+    consumed resource.
+
+    Parameters
+    ----------
+    gas_limit :
+        The gas limit of the block.
+
+    Returns
+    -------
+    state_gas_per_byte: `Uint`
+        The state gas per byte.
+
+    """
+    return gas_limit // (TARGET_STATE_BYTES_PER_BLOCK * Uint(2))
