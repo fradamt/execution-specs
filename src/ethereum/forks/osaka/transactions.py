@@ -521,7 +521,7 @@ def decode_transaction(tx: LegacyTransaction | Bytes) -> Transaction:
 
 
 def validate_transaction(
-    tx: Transaction, state_gas_per_byte: Uint, sending_value_to_new_account: bool
+    tx: Transaction, gas_limit: Uint, transfer_to_new_account: bool
 ) -> Tuple[Uint, Uint, Uint]:
     """
     Verifies a transaction.
@@ -540,7 +540,7 @@ def validate_transaction(
     Also, the code size of a contract creation transaction must be within
     limits of the protocol.
 
-    This function takes a transaction and state_gas_per_byte as parameters and
+    This function takes a transaction and gas_limit as parameters and
     returns the intrinsic regular gas cost, intrinsic state gas cost, and the
     minimum calldata gas cost for the transaction after validation. It throws
     an `InsufficientTransactionGasError` exception if the transaction does not
@@ -555,9 +555,7 @@ def validate_transaction(
     from .vm.interpreter import MAX_INIT_CODE_SIZE
 
     intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost = (
-        calculate_intrinsic_cost(
-            tx, state_gas_per_byte, sending_value_to_new_account
-        )
+        calculate_intrinsic_cost(tx, gas_limit, transfer_to_new_account)
     )
     intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
     if max(intrinsic_gas, calldata_floor_gas_cost) > tx.gas:
@@ -576,7 +574,7 @@ def validate_transaction(
 
 
 def calculate_intrinsic_cost(
-    tx: Transaction, state_gas_per_byte: Uint, sending_value_to_new_account: bool
+    tx: Transaction, gas_limit: Uint, transfer_to_new_account: bool
 ) -> Tuple[Uint, Uint, Uint]:
     """
     Calculates the gas that is charged before execution is started.
@@ -598,11 +596,11 @@ def calculate_intrinsic_cost(
     5. Cost for authorizations (if applicable)
 
 
-    This function takes a transaction and state_gas_per_byte as parameters and
+    This function takes a transaction and gas_limit as parameters and
     returns the intrinsic regular gas cost, intrinsic state gas cost, and the
     minimum gas cost used by the transaction based on the calldata size.
     """
-    from .vm.gas import NEW_ACCOUNT_BYTES, init_code_cost
+    from .vm.gas import NEW_ACCOUNT_BYTES, get_state_gas_per_byte, init_code_cost
 
     zero_bytes = 0
     for byte in tx.data:
@@ -617,12 +615,14 @@ def calculate_intrinsic_cost(
 
     data_gas = tokens_in_calldata * STANDARD_CALLDATA_TOKEN_COST
 
+    state_gas_per_byte = get_state_gas_per_byte(gas_limit)
+
     create_regular_gas = Uint(0)
     create_state_gas = Uint(0)
     if tx.to == Bytes0(b""):
         create_state_gas = NEW_ACCOUNT_BYTES * state_gas_per_byte
         create_regular_gas = init_code_cost(ulen(tx.data))
-    elif sending_value_to_new_account:
+    elif transfer_to_new_account:
         # EIP-2780: Charge for new account creation when sending value to
         # fresh EOA. This prevents bypassing GAS_NEW_ACCOUNT by first sending
         # a cheap ETH transfer.
@@ -646,8 +646,8 @@ def calculate_intrinsic_cost(
 
     auth_state_gas = Uint(0)
     if isinstance(tx, SetCodeTransaction):
-        auth_state_gas += NEW_ACCOUNT_BYTES * state_gas_per_byte * Uint(
-            len(tx.authorizations)
+        auth_state_gas = (
+            NEW_ACCOUNT_BYTES * state_gas_per_byte * Uint(len(tx.authorizations))
         )
 
     intrinsic_regular_gas = Uint(

@@ -30,6 +30,7 @@ from ..gas import (
     GAS_WARM_ACCESS,
     STORAGE_SET_BYTES,
     charge_gas,
+    get_state_gas_per_byte,
 )
 from ..stack import pop, push
 
@@ -88,7 +89,11 @@ def sstore(evm: Evm) -> None:
     )
     current_value = get_storage(state, evm.message.current_target, key)
 
-    state_gas_storage_set = STORAGE_SET_BYTES * evm.message.block_env.state_gas_per_byte
+
+    state_gas_per_byte = get_state_gas_per_byte(
+        evm.message.block_env.block_gas_limit
+    )
+    state_gas_storage_set = STORAGE_SET_BYTES * state_gas_per_byte
     gas_cost = Uint(0)
 
     if (evm.message.current_target, key) not in evm.accessed_storage_keys:
@@ -98,8 +103,9 @@ def sstore(evm: Evm) -> None:
     if original_value == current_value and current_value != new_value:
         if original_value == 0:
             charge_gas(evm, state_gas_storage_set, GasType.STATE)
-        else:
-            gas_cost += GAS_STORAGE_UPDATE - GAS_COLD_SLOAD
+        # charge regular cost for the operation, even when we 
+        # already charge state gas for state creation
+        gas_cost += GAS_STORAGE_UPDATE - GAS_COLD_SLOAD
     else:
         gas_cost += GAS_WARM_ACCESS
 

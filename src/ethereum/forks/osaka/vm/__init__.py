@@ -60,7 +60,6 @@ class BlockEnvironment:
     prev_randao: Bytes32
     excess_blob_gas: U64
     parent_beacon_block_root: Hash32
-    state_gas_per_byte: Uint
 
 
 @dataclass

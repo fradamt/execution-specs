@@ -47,7 +47,12 @@ from ..state import (
 )
 from ..vm import GasType, Message
 from ..vm.eoa_delegation import get_delegated_code_address, set_delegation
-from ..vm.gas import CODE_DEPOSIT_BYTES, GAS_KECCAK256_WORD, charge_gas
+from ..vm.gas import (
+    CODE_DEPOSIT_BYTES,
+    GAS_KECCAK256_WORD,
+    charge_gas,
+    get_state_gas_per_byte,
+)
 from ..vm.precompiled_contracts.mapping import PRE_COMPILED_CONTRACTS
 from . import Evm
 from .exceptions import (
@@ -206,7 +211,12 @@ def process_create_message(message: Message) -> Evm:
             if len(contract_code) > 0:
                 if contract_code[0] == 0xEF:
                     raise InvalidContractPrefix
-            code_deposit_state_gas = Uint(len(contract_code)) * CODE_DEPOSIT_BYTES * message.block_env.state_gas_per_byte
+            state_gas_per_byte = get_state_gas_per_byte(
+                message.block_env.block_gas_limit
+            )
+            code_deposit_state_gas = (
+                Uint(len(contract_code)) * CODE_DEPOSIT_BYTES * state_gas_per_byte
+            )
             charge_gas(evm, code_deposit_state_gas, GasType.STATE)
             # Hash cost for computing keccak256 of deployed bytecode
             code_hash_gas = GAS_KECCAK256_WORD * ceil32(Uint(len(contract_code))) // Uint(32)

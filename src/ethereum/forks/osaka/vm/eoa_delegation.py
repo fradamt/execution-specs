@@ -20,6 +20,7 @@ from ..vm.gas import (
     GAS_WARM_ACCESS,
     NEW_ACCOUNT_BYTES,
     PER_AUTH_BASE_BYTES,
+    get_state_gas_per_byte,
 )
 from . import Evm, Message
 
@@ -167,7 +168,7 @@ def set_delegation(message: Message) -> None:
 
     """
     state = message.block_env.state
-    state_gas_per_byte = message.block_env.state_gas_per_byte
+    state_gas_per_byte = get_state_gas_per_byte(message.block_env.block_gas_limit)
     for auth in message.tx_env.authorizations:
         if auth.chain_id not in (message.block_env.chain_id, U256(0)):
             continue

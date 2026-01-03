@@ -86,7 +86,6 @@ from .vm.gas import (
     calculate_data_fee,
     calculate_excess_blob_gas,
     calculate_total_blob_gas,
-    get_state_gas_per_byte,
 )
 from .vm.interpreter import MessageCallOutput, process_message_call
 from .vm.precompiled_contracts.mapping import PRE_COMPILED_CONTRACTS
@@ -224,8 +223,6 @@ def state_transition(chain: BlockChain, block: Block) -> None:
     if block.ommers != ():
         raise InvalidBlock
 
-    state_gas_per_byte = get_state_gas_per_byte(block.header.gas_limit)
-
     block_env = vm.BlockEnvironment(
         chain_id=chain.chain_id,
         state=chain.state,
@@ -238,7 +235,6 @@ def state_transition(chain: BlockChain, block: Block) -> None:
         prev_randao=block.header.prev_randao,
         excess_blob_gas=block.header.excess_blob_gas,
         parent_beacon_block_root=block.header.parent_beacon_block_root,
-        state_gas_per_byte=state_gas_per_byte,
     )
 
     block_output = apply_body(
@@ -887,7 +883,7 @@ def process_transaction(
     )
 
     # EIP-2780: Check if this is a value transfer that will create a new account
-    sending_value_to_new_account = (
+    transfer_to_new_account = (
         isinstance(tx.to, Address)
         and tx.value > 0
         and tx.to not in PRE_COMPILED_CONTRACTS
@@ -896,7 +892,7 @@ def process_transaction(
 
     intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost = (
         validate_transaction(
-            tx, block_env.state_gas_per_byte, sending_value_to_new_account
+            tx, block_env.block_gas_limit, transfer_to_new_account
         )
     )
 
