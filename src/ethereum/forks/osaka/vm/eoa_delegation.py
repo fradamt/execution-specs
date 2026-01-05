@@ -19,7 +19,6 @@ from ..vm.gas import (
     GAS_COLD_ACCOUNT_ACCESS,
     GAS_WARM_ACCESS,
     NEW_ACCOUNT_BYTES,
-    PER_AUTH_BASE_BYTES,
     get_state_gas_per_byte,
 )
 from . import Evm, Message
@@ -197,7 +196,7 @@ def set_delegation(message: Message) -> None:
             # For existing accounts, only PER_AUTH_BASE_BYTES are created (the code itself)
             # Adjust intrinsic_state_gas to reflect actual state created
             message.tx_env.intrinsic_state_gas -= (
-                (NEW_ACCOUNT_BYTES - PER_AUTH_BASE_BYTES) * state_gas_per_byte
+                NEW_ACCOUNT_BYTES * state_gas_per_byte
             )
 
         if auth.address == NULL_ADDRESS:

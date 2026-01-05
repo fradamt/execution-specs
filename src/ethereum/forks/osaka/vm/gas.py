@@ -77,10 +77,13 @@ BLOB_BASE_FEE_UPDATE_FRACTION = Uint(5007716)
 TARGET_STATE_BYTES_PER_BLOCK = Uint(45_000)
 
 # State byte constants (EIP-8037 harmonization)
-CODE_DEPOSIT_BYTES = Uint(1)
 NEW_ACCOUNT_BYTES = Uint(112)
 STORAGE_SET_BYTES = Uint(32)
 PER_AUTH_BASE_BYTES = Uint(23)
+
+# EIP-7702 authorization base cost (regular gas per authorization)
+# Covers: calldata (1616) + ecrecover (3000) + cold access (2600) + warm write (200)
+PER_AUTH_BASE_COST = Uint(7500)
 
 GAS_BLS_G1_ADD = Uint(375)
 GAS_BLS_G1_MUL = Uint(12000)

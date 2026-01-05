@@ -600,7 +600,13 @@ def calculate_intrinsic_cost(
     returns the intrinsic regular gas cost, intrinsic state gas cost, and the
     minimum gas cost used by the transaction based on the calldata size.
     """
-    from .vm.gas import NEW_ACCOUNT_BYTES, get_state_gas_per_byte, init_code_cost
+    from .vm.gas import (
+        NEW_ACCOUNT_BYTES,
+        PER_AUTH_BASE_BYTES,
+        PER_AUTH_BASE_COST,
+        get_state_gas_per_byte,
+        init_code_cost,
+    )
 
     zero_bytes = 0
     for byte in tx.data:
@@ -644,10 +650,14 @@ def calculate_intrinsic_cost(
                 ulen(access.slots) * TX_ACCESS_LIST_STORAGE_KEY_COST
             )
 
+    auth_regular_gas = Uint(0)
     auth_state_gas = Uint(0)
     if isinstance(tx, SetCodeTransaction):
+        auth_regular_gas = PER_AUTH_BASE_COST * Uint(len(tx.authorizations))
         auth_state_gas = (
-            NEW_ACCOUNT_BYTES * state_gas_per_byte * Uint(len(tx.authorizations))
+            (NEW_ACCOUNT_BYTES + PER_AUTH_BASE_BYTES)
+            * state_gas_per_byte
+            * Uint(len(tx.authorizations))
         )
 
     intrinsic_regular_gas = Uint(
@@ -655,6 +665,7 @@ def calculate_intrinsic_cost(
         + data_gas
         + create_regular_gas
         + access_list_gas
+        + auth_regular_gas
     )
 
     intrinsic_state_gas = create_state_gas + auth_state_gas
