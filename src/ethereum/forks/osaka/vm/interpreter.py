@@ -308,6 +308,7 @@ def execute_code(message: Message) -> Evm:
         memory=bytearray(),
         code=code,
         gas_left=message.gas,
+        state_gas_reservoir_left=message.state_gas_reservoir,
         valid_jump_destinations=valid_jump_destinations,
         logs=(),
         refund_counter=0,

@@ -62,6 +62,7 @@ from .state import (
     state_root,
 )
 from .transactions import (
+    TX_MAX_GAS_LIMIT,
     AccessListTransaction,
     BlobTransaction,
     FeeMarketTransaction,
@@ -627,6 +628,7 @@ def process_system_transaction(
         origin=SYSTEM_ADDRESS,
         gas_price=block_env.base_fee_per_gas,
         gas=SYSTEM_TRANSACTION_GAS,
+        state_gas_reservoir=Uint(0),
         access_list_addresses=set(),
         access_list_storage_keys=set(),
         transient_storage=TransientStorage(),
@@ -644,6 +646,7 @@ def process_system_transaction(
         caller=SYSTEM_ADDRESS,
         target=target_address,
         gas=SYSTEM_TRANSACTION_GAS,
+        state_gas_reservoir=Uint(0),
         value=U256(0),
         data=data,
         code=system_contract_code,
@@ -918,7 +921,10 @@ def process_transaction(
 
     effective_gas_fee = tx.gas * effective_gas_price
 
-    gas = tx.gas - intrinsic_gas
+    # Split execution gas into gas_left (capped at 16M) and reservoir
+    execution_gas = tx.gas - intrinsic_gas
+    gas = min(TX_MAX_GAS_LIMIT, execution_gas)
+    state_gas_reservoir = Uint(max(int(execution_gas) - int(TX_MAX_GAS_LIMIT), 0))
     increment_nonce(block_env.state, sender)
 
     sender_balance_after_gas_fee = (
@@ -953,6 +959,7 @@ def process_transaction(
         origin=sender,
         gas_price=effective_gas_price,
         gas=gas,
+        state_gas_reservoir=state_gas_reservoir,
         access_list_addresses=access_list_addresses,
         access_list_storage_keys=access_list_storage_keys,
         transient_storage=TransientStorage(),

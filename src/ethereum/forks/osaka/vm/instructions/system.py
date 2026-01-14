@@ -85,6 +85,11 @@ def generic_create(
 
     create_message_gas = max_message_call_gas(Uint(evm.gas_left))
     evm.gas_left -= create_message_gas
+
+    # Pass full reservoir to child (no 63/64 rule for state gas)
+    create_message_state_gas_reservoir = evm.state_gas_reservoir_left
+    evm.state_gas_reservoir_left = Uint(0)
+
     if evm.message.is_static:
         raise WriteInStaticContext
     evm.return_data = b""
@@ -98,6 +103,7 @@ def generic_create(
         or evm.message.depth + Uint(1) > STACK_DEPTH_LIMIT
     ):
         evm.gas_left += create_message_gas
+        evm.state_gas_reservoir_left += create_message_state_gas_reservoir
         push(evm.stack, U256(0))
         return
 
@@ -109,6 +115,7 @@ def generic_create(
         increment_nonce(
             evm.message.block_env.state, evm.message.current_target
         )
+        evm.state_gas_reservoir_left += create_message_state_gas_reservoir
         push(evm.stack, U256(0))
         return
 
@@ -120,6 +127,7 @@ def generic_create(
         caller=evm.message.current_target,
         target=Bytes0(),
         gas=create_message_gas,
+        state_gas_reservoir=create_message_state_gas_reservoir,
         value=endowment,
         data=b"",
         code=call_data,
@@ -284,6 +292,7 @@ def return_(evm: Evm) -> None:
 def generic_call(
     evm: Evm,
     gas: Uint,
+    state_gas_reservoir: Uint,
     value: U256,
     caller: Address,
     to: Address,
@@ -306,6 +315,7 @@ def generic_call(
 
     if evm.message.depth + Uint(1) > STACK_DEPTH_LIMIT:
         evm.gas_left += gas
+        evm.state_gas_reservoir_left += state_gas_reservoir
         push(evm.stack, U256(0))
         return
 
@@ -319,6 +329,7 @@ def generic_call(
         caller=caller,
         target=to,
         gas=gas,
+        state_gas_reservoir=state_gas_reservoir,
         value=value,
         data=call_data,
         code=code,
@@ -413,6 +424,11 @@ def call(evm: Evm) -> None:
     if evm.message.is_static and value != U256(0):
         raise WriteInStaticContext
     evm.memory += b"\x00" * extend_memory.expand_by
+
+    # Pass full reservoir to child (no 63/64 rule for state gas)
+    child_state_gas_reservoir = evm.state_gas_reservoir_left
+    evm.state_gas_reservoir_left = Uint(0)
+
     sender_balance = get_account(
         evm.message.block_env.state, evm.message.current_target
     ).balance
@@ -420,10 +436,12 @@ def call(evm: Evm) -> None:
         push(evm.stack, U256(0))
         evm.return_data = b""
         evm.gas_left += message_call_gas.sub_call
+        evm.state_gas_reservoir_left += child_state_gas_reservoir
     else:
         generic_call(
             evm,
             message_call_gas.sub_call,
+            child_state_gas_reservoir,
             value,
             evm.message.current_target,
             to,
@@ -498,6 +516,11 @@ def callcode(evm: Evm) -> None:
 
     # OPERATION
     evm.memory += b"\x00" * extend_memory.expand_by
+
+    # Pass full reservoir to child (no 63/64 rule for state gas)
+    child_state_gas_reservoir = evm.state_gas_reservoir_left
+    evm.state_gas_reservoir_left = Uint(0)
+
     sender_balance = get_account(
         evm.message.block_env.state, evm.message.current_target
     ).balance
@@ -505,10 +528,12 @@ def callcode(evm: Evm) -> None:
         push(evm.stack, U256(0))
         evm.return_data = b""
         evm.gas_left += message_call_gas.sub_call
+        evm.state_gas_reservoir_left += child_state_gas_reservoir
     else:
         generic_call(
             evm,
             message_call_gas.sub_call,
+            child_state_gas_reservoir,
             value,
             evm.message.current_target,
             to,
@@ -639,9 +664,15 @@ def delegatecall(evm: Evm) -> None:
 
     # OPERATION
     evm.memory += b"\x00" * extend_memory.expand_by
+
+    # Pass full reservoir to child (no 63/64 rule for state gas)
+    child_state_gas_reservoir = evm.state_gas_reservoir_left
+    evm.state_gas_reservoir_left = Uint(0)
+
     generic_call(
         evm,
         message_call_gas.sub_call,
+        child_state_gas_reservoir,
         evm.message.value,
         evm.message.caller,
         evm.message.current_target,
@@ -713,9 +744,15 @@ def staticcall(evm: Evm) -> None:
 
     # OPERATION
     evm.memory += b"\x00" * extend_memory.expand_by
+
+    # Pass full reservoir to child (no 63/64 rule for state gas)
+    child_state_gas_reservoir = evm.state_gas_reservoir_left
+    evm.state_gas_reservoir_left = Uint(0)
+
     generic_call(
         evm,
         message_call_gas.sub_call,
+        child_state_gas_reservoir,
         U256(0),
         evm.message.current_target,
         to,

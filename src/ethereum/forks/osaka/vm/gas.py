@@ -20,7 +20,7 @@ from ethereum.trace import GasAndRefund, evm_trace
 from ethereum.utils.numeric import ceil32, taylor_exponential
 
 from ..blocks import Header
-from ..transactions import TX_MAX_GAS_LIMIT, BlobTransaction, Transaction
+from ..transactions import BlobTransaction, Transaction
 from . import Evm, GasType
 from .exceptions import OutOfGasError
 
@@ -130,8 +130,12 @@ def charge_gas(
     evm: Evm, amount: Uint, gas_type: GasType = GasType.REGULAR
 ) -> None:
     """
-    Subtracts `amount` from `evm.gas_left` and updates gas usage in the
-    corresponding element of `gas_used_vector`.
+    Subtracts `amount` from the appropriate gas pool and updates gas usage.
+
+    For STATE gas, charges from the reservoir (state_gas_left) first,
+    then from gas_left when the reservoir is empty.
+
+    For REGULAR gas, charges from gas_left only.
 
     Parameters
     ----------
@@ -145,18 +149,22 @@ def charge_gas(
     """
     evm_trace(evm, GasAndRefund(int(amount)))
 
-    if evm.gas_left < amount:
-        raise OutOfGasError
+    if gas_type == GasType.STATE:
+        # Draw from reservoir first, then gas_left
+        if evm.state_gas_reservoir_left >= amount:
+            evm.state_gas_reservoir_left -= amount
+        elif evm.state_gas_reservoir_left + evm.gas_left >= amount:
+            remainder = amount - evm.state_gas_reservoir_left
+            evm.state_gas_reservoir_left = Uint(0)
+            evm.gas_left -= remainder
+        else:
+            raise OutOfGasError
+    else:
+        # Regular gas: draw from gas_left only
+        if evm.gas_left < amount:
+            raise OutOfGasError
+        evm.gas_left -= amount
 
-    # Check regular gas limit (EIP-7825 runtime enforcement)
-    # Only applies to regular transactions (intrinsic_regular_gas > 0),
-    # not to system transactions
-    if gas_type == GasType.REGULAR:
-        if evm.message.tx_env.intrinsic_regular_gas > Uint(0):
-            if evm.gas_used[GasType.REGULAR] + amount > TX_MAX_GAS_LIMIT:
-                raise OutOfGasError
-
-    evm.gas_left -= amount
     evm.gas_used[gas_type] += amount
 
 

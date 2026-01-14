@@ -116,6 +116,7 @@ class TransactionEnvironment:
     origin: Address
     gas_price: Uint
     gas: Uint
+    state_gas_reservoir: Uint
     access_list_addresses: Set[Address]
     access_list_storage_keys: Set[Tuple[Address, Bytes32]]
     transient_storage: TransientStorage
@@ -139,6 +140,7 @@ class Message:
     target: Bytes0 | Address
     current_target: Address
     gas: Uint
+    state_gas_reservoir: Uint
     value: U256
     data: Bytes
     code_address: Optional[Address]
@@ -161,6 +163,7 @@ class Evm:
     memory: bytearray
     code: Bytes
     gas_left: Uint
+    state_gas_reservoir_left: Uint
     valid_jump_destinations: Set[Uint]
     logs: Tuple[Log, ...]
     refund_counter: int
@@ -188,6 +191,7 @@ def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
 
     """
     evm.gas_left += child_evm.gas_left
+    evm.state_gas_reservoir_left += child_evm.state_gas_reservoir_left
     evm.logs += child_evm.logs
     evm.refund_counter += child_evm.refund_counter
     evm.accounts_to_delete.update(child_evm.accounts_to_delete)
@@ -211,6 +215,7 @@ def incorporate_child_on_error(evm: Evm, child_evm: Evm) -> None:
 
     """
     evm.gas_left += child_evm.gas_left
+    evm.state_gas_reservoir_left += child_evm.state_gas_reservoir_left
     # gas_used is cumulative, so child's final values become parent's values
     # Even on error, the gas consumed by the child is still accounted for
     for gas_type in GasType:
