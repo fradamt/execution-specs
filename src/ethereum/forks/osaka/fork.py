@@ -924,7 +924,7 @@ def process_transaction(
     # Split execution gas into gas_left (capped at 16M) and reservoir
     execution_gas = tx.gas - intrinsic_gas
     gas = min(TX_MAX_GAS_LIMIT, execution_gas)
-    state_gas_reservoir = Uint(max(int(execution_gas) - int(TX_MAX_GAS_LIMIT), 0))
+    state_gas_reservoir = Uint(execution_gas - gas)
     increment_nonce(block_env.state, sender)
 
     sender_balance_after_gas_fee = (
