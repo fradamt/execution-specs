@@ -176,7 +176,9 @@ def create(evm: Evm) -> None:
     state_gas_per_byte = get_state_gas_per_byte(
         evm.message.block_env.block_gas_limit
     )
-    charge_gas(evm, extend_memory.cost + init_code_gas)
+    charge_gas(
+        evm, GAS_COLD_ACCOUNT_ACCESS + extend_memory.cost + init_code_gas
+    )
     charge_gas(evm, NEW_ACCOUNT_BYTES * state_gas_per_byte, GasType.STATE)
 
     # OPERATION
@@ -230,7 +232,8 @@ def create2(evm: Evm) -> None:
     )
     charge_gas(
         evm,
-        GAS_KECCAK256_WORD * call_data_words
+        GAS_COLD_ACCOUNT_ACCESS
+        + GAS_KECCAK256_WORD * call_data_words
         + extend_memory.cost
         + init_code_gas,
     )

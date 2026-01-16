@@ -601,6 +601,7 @@ def calculate_intrinsic_cost(
     minimum gas cost used by the transaction based on the calldata size.
     """
     from .vm.gas import (
+        GAS_COLD_ACCOUNT_ACCESS,
         NEW_ACCOUNT_BYTES,
         PER_AUTH_BASE_BYTES,
         PER_AUTH_BASE_COST,
@@ -627,7 +628,7 @@ def calculate_intrinsic_cost(
     create_state_gas = Uint(0)
     if tx.to == Bytes0(b""):
         create_state_gas = NEW_ACCOUNT_BYTES * state_gas_per_byte
-        create_regular_gas = init_code_cost(ulen(tx.data))
+        create_regular_gas = GAS_COLD_ACCOUNT_ACCESS + init_code_cost(ulen(tx.data))
     elif transfer_to_new_account:
         # EIP-2780: Charge for new account creation when sending value to
         # fresh EOA. This prevents bypassing GAS_NEW_ACCOUNT by first sending
