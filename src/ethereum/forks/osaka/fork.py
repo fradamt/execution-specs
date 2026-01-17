@@ -977,7 +977,7 @@ def process_transaction(
 
     # For EIP-7623 we first calculate the execution_gas_used, which includes
     # the execution gas refund.
-    tx_gas_used_before_refund = tx.gas - tx_output.gas_left
+    tx_gas_used_before_refund = tx_output.gas_used[GasType.REGULAR] + tx_output.gas_used[GasType.STATE]
     tx_gas_refund = min(
         tx_gas_used_before_refund // Uint(5), Uint(tx_output.refund_counter)
     )
