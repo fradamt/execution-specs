@@ -921,9 +921,13 @@ def process_transaction(
 
     effective_gas_fee = tx.gas * effective_gas_price
 
-    # Split execution gas into gas_left (capped at 16M) and reservoir
+    # Split execution gas into gas_left (capped by remaining regular gas budget)
+    # and state_gas_reservoir. TX_MAX_GAS_LIMIT applies to total regular gas
+    # (intrinsic_regular_gas + execution regular gas), not just execution gas.
+    # validate_transaction ensures intrinsic_regular_gas <= TX_MAX_GAS_LIMIT.
     execution_gas = tx.gas - intrinsic_gas
-    gas = min(TX_MAX_GAS_LIMIT, execution_gas)
+    regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_regular_gas
+    gas = min(regular_gas_budget, execution_gas)
     state_gas_reservoir = Uint(execution_gas - gas)
     increment_nonce(block_env.state, sender)
 

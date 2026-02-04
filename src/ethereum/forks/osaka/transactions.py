@@ -560,15 +560,20 @@ def validate_transaction(
     intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
     if max(intrinsic_gas, calldata_floor_gas_cost) > tx.gas:
         raise InsufficientTransactionGasError("Insufficient gas")
+    if max(intrinsic_regular_gas, calldata_floor_gas_cost) > TX_MAX_GAS_LIMIT:
+        raise InsufficientTransactionGasError(
+            "Intrinsic regular gas or calldata floor exceeds TX_MAX_GAS_LIMIT"
+        )
     if U256(tx.nonce) >= U256(U64.MAX_VALUE):
         raise NonceOverflowError("Nonce too high")
     if tx.to == Bytes0(b"") and len(tx.data) > MAX_INIT_CODE_SIZE:
         raise InitCodeTooLargeError("Code size too large")
-    # Note: TX_MAX_GAS_LIMIT is now enforced at runtime (in charge_gas) rather
-    # than at validation time. This allows transactions with tx.gas > limit
-    # to be valid, but they will revert if regular gas usage exceeds the limit.
-    # This separation enables large contract deployments where state gas is
-    # the limiting factor rather than regular gas (EIP-8037).
+    # Note: TX_MAX_GAS_LIMIT caps total regular gas (intrinsic + execution).
+    # Intrinsic regular gas is validated above. Execution regular gas is
+    # enforced at runtime - transactions revert if regular gas exceeds the
+    # remaining budget (TX_MAX_GAS_LIMIT - intrinsic_regular_gas). This allows
+    # tx.gas > TX_MAX_GAS_LIMIT for large contract deployments where state gas
+    # is the limiting factor (EIP-8037).
 
     return intrinsic_regular_gas, intrinsic_state_gas, calldata_floor_gas_cost
 
