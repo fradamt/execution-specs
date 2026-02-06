@@ -12,12 +12,13 @@ A straightforward interpreter that executes EVM code.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Set, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 from ethereum_types.bytes import Bytes, Bytes0
 from ethereum_types.numeric import U64, U256, Uint, ulen
 
 from ethereum.exceptions import EthereumException
+from ethereum.utils.numeric import ceil32
 from ethereum.trace import (
     EvmStop,
     OpEnd,
@@ -54,9 +55,13 @@ from ..state_tracker import (
     track_code_change,
     track_nonce_change,
 )
-from ..vm import Message
+from ..vm import GasType, Message
 from ..vm.eoa_delegation import get_delegated_code_address, set_delegation
-from ..vm.gas import GAS_CODE_DEPOSIT, charge_gas
+from ..vm.gas import (
+    GAS_KECCAK256_WORD,
+    charge_gas,
+    get_state_gas_per_byte,
+)
 from ..vm.precompiled_contracts.mapping import PRE_COMPILED_CONTRACTS
 from . import Evm
 from .exceptions import (
@@ -89,14 +94,17 @@ class MessageCallOutput:
           4. `accounts_to_delete`: Contracts which have self-destructed.
           5. `error`: The error from the execution if any.
           6. `return_data`: The output of the execution.
+          7. `gas_used`: Gas used by type (regular, state, etc.).
     """
 
     gas_left: Uint
+    state_gas_reservoir_left: Uint
     refund_counter: U256
     logs: Tuple[Log, ...]
     accounts_to_delete: Set[Address]
     error: Optional[EthereumException]
     return_data: Bytes
+    gas_used: Dict[GasType, Uint]
 
 
 def process_message_call(message: Message) -> MessageCallOutput:
@@ -124,18 +132,20 @@ def process_message_call(message: Message) -> MessageCallOutput:
         track_address(message.tx_env.state_changes, message.current_target)
         if is_collision:
             return MessageCallOutput(
-                Uint(0),
-                U256(0),
-                tuple(),
-                set(),
-                AddressCollision(),
-                Bytes(b""),
+                gas_left=Uint(0),
+                state_gas_reservoir_left=Uint(0),
+                refund_counter=U256(0),
+                logs=tuple(),
+                accounts_to_delete=set(),
+                error=AddressCollision(),
+                return_data=Bytes(b""),
+                gas_used={gas_type: Uint(0) for gas_type in GasType},
             )
         else:
             evm = process_create_message(message)
     else:
         if message.tx_env.authorizations != ():
-            refund_counter += set_delegation(message)
+            set_delegation(message)
 
         delegated_address = get_delegated_code_address(message.code)
         if delegated_address is not None:
@@ -162,11 +172,13 @@ def process_message_call(message: Message) -> MessageCallOutput:
 
     return MessageCallOutput(
         gas_left=evm.gas_left,
+        state_gas_reservoir_left=evm.state_gas_reservoir_left,
         refund_counter=refund_counter,
         logs=logs,
         accounts_to_delete=accounts_to_delete,
         error=evm.error,
         return_data=evm.output,
+        gas_used=evm.gas_used,
     )
 
 
@@ -218,18 +230,31 @@ def process_create_message(message: Message) -> Evm:
     evm = process_message(message)
     if not evm.error:
         contract_code = evm.output
-        contract_code_gas = Uint(len(contract_code)) * GAS_CODE_DEPOSIT
         try:
             if len(contract_code) > 0:
                 if contract_code[0] == 0xEF:
                     raise InvalidContractPrefix
-            charge_gas(evm, contract_code_gas)
+            state_gas_per_byte = get_state_gas_per_byte(
+                message.block_env.block_gas_limit
+            )
+            code_deposit_state_gas = (
+                Uint(len(contract_code)) * state_gas_per_byte
+            )
+            charge_gas(evm, code_deposit_state_gas, GasType.STATE)
+            # Hash cost for computing keccak256 of deployed bytecode
+            code_hash_gas = (
+                GAS_KECCAK256_WORD
+                * ceil32(Uint(len(contract_code)))
+                // Uint(32)
+            )
+            charge_gas(evm, code_hash_gas)
             if len(contract_code) > MAX_CODE_SIZE:
                 raise OutOfGasError
         except ExceptionalHalt as error:
             rollback_transaction(state, transient_storage)
             merge_on_failure(message.state_changes)
             evm.gas_left = Uint(0)
+            evm.state_gas_reservoir_left = Uint(0)
             evm.output = b""
             evm.error = error
         else:
@@ -271,12 +296,14 @@ def process_message(message: Message) -> Evm:
 
     code = message.code
     valid_jump_destinations = get_valid_jump_destinations(code)
+
     evm = Evm(
         pc=Uint(0),
         stack=[],
         memory=bytearray(),
         code=code,
         gas_left=message.gas,
+        state_gas_reservoir_left=message.state_gas_reservoir,
         valid_jump_destinations=valid_jump_destinations,
         logs=(),
         refund_counter=0,
@@ -353,6 +380,7 @@ def process_message(message: Message) -> Evm:
     except ExceptionalHalt as error:
         evm_trace(evm, OpException(error))
         evm.gas_left = Uint(0)
+        evm.state_gas_reservoir_left = Uint(0)
         evm.output = b""
         evm.error = error
     except Revert as error:

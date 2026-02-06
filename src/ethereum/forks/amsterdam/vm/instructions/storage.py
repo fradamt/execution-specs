@@ -25,17 +25,18 @@ from ...state_tracker import (
     track_storage_read,
     track_storage_write,
 )
-from .. import Evm
+from .. import Evm, GasType
 from ..exceptions import WriteInStaticContext
 from ..gas import (
     GAS_CALL_STIPEND,
     GAS_COLD_SLOAD,
     GAS_STORAGE_CLEAR_REFUND,
-    GAS_STORAGE_SET,
     GAS_STORAGE_UPDATE,
     GAS_WARM_ACCESS,
+    STORAGE_SET_BYTES,
     charge_gas,
     check_gas,
+    get_state_gas_per_byte,
 )
 from ..stack import pop, push
 
@@ -103,6 +104,10 @@ def sstore(evm: Evm) -> None:
     )
     current_value = get_storage(state, evm.message.current_target, key)
 
+    state_gas_per_byte = get_state_gas_per_byte(
+        evm.message.block_env.block_gas_limit
+    )
+    state_gas_storage_set = STORAGE_SET_BYTES * state_gas_per_byte
     gas_cost = Uint(0)
 
     if (evm.message.current_target, key) not in evm.accessed_storage_keys:
@@ -123,9 +128,10 @@ def sstore(evm: Evm) -> None:
 
     if original_value == current_value and current_value != new_value:
         if original_value == 0:
-            gas_cost += GAS_STORAGE_SET
-        else:
-            gas_cost += GAS_STORAGE_UPDATE - GAS_COLD_SLOAD
+            charge_gas(evm, state_gas_storage_set, GasType.STATE)
+        # charge regular cost for the operation, even when we
+        # already charge state gas for state creation
+        gas_cost += GAS_STORAGE_UPDATE - GAS_COLD_SLOAD
     else:
         gas_cost += GAS_WARM_ACCESS
 
@@ -142,8 +148,16 @@ def sstore(evm: Evm) -> None:
         if original_value == new_value:
             # Storage slot being restored to its original value
             if original_value == 0:
-                # Slot was originally empty and was SET earlier
-                evm.refund_counter += int(GAS_STORAGE_SET - GAS_WARM_ACCESS)
+                # Slot was originally empty and was SET earlier.
+                # Refund state gas and the write cost (the write
+                # is cancelled — clients batch trie writes to slot
+                # boundaries, so no IO actually happens).
+                evm.refund_counter += int(
+                    state_gas_storage_set
+                    + GAS_STORAGE_UPDATE
+                    - GAS_COLD_SLOAD
+                    - GAS_WARM_ACCESS
+                )
             else:
                 # Slot was originally non-empty and was UPDATED earlier
                 evm.refund_counter += int(
