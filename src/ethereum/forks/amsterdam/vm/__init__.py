@@ -12,14 +12,27 @@ The abstract computer which runs the code stored in an
 `.fork_types.Account`.
 """
 
+import enum
 from dataclasses import dataclass, field
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ethereum_types.bytes import Bytes, Bytes0, Bytes32
 from ethereum_types.numeric import U64, U256, Uint
 
 from ethereum.crypto.hash import Hash32
 from ethereum.exceptions import EthereumException
+
+
+class GasType(enum.Enum):
+    """
+    Type of gas being charged. Used for multidimensional gas metering.
+
+    REGULAR: Standard execution gas (opcodes, memory, etc.)
+    STATE: State growth gas (account creation, storage set, code deposit)
+    """
+
+    REGULAR = 0
+    STATE = 1
 
 from ..block_access_lists.rlp_types import BlockAccessList
 from ..blocks import Log, Receipt, Withdrawal
@@ -59,8 +72,12 @@ class BlockOutput:
 
     Contains the following:
 
-    block_gas_used : `ethereum.base_types.Uint`
-        Gas used for executing all transactions.
+    block_regular_gas_used : `ethereum.base_types.Uint`
+        Regular gas used for executing all transactions.
+    block_state_gas_used : `ethereum.base_types.Uint`
+        State gas used for executing all transactions.
+    cumulative_gas_used : `ethereum.base_types.Uint`
+        Cumulative gas paid by users (post-refund, post-floor).
     transactions_trie : `ethereum.fork_types.Root`
         Trie of all the transactions in the block.
     receipts_trie : `ethereum.fork_types.Root`
@@ -80,7 +97,9 @@ class BlockOutput:
         The block access list for the block.
     """
 
-    block_gas_used: Uint = Uint(0)
+    block_regular_gas_used: Uint = Uint(0)
+    block_state_gas_used: Uint = Uint(0)
+    cumulative_gas_used: Uint = Uint(0)
     transactions_trie: Trie[Bytes, Optional[Bytes | LegacyTransaction]] = (
         field(default_factory=lambda: Trie(secured=False, default=None))
     )
@@ -106,6 +125,7 @@ class TransactionEnvironment:
     origin: Address
     gas_price: Uint
     gas: Uint
+    state_gas_reservoir: Uint
     access_list_addresses: Set[Address]
     access_list_storage_keys: Set[Tuple[Address, Bytes32]]
     transient_storage: TransientStorage
@@ -113,6 +133,8 @@ class TransactionEnvironment:
     authorizations: Tuple[Authorization, ...]
     index_in_block: Optional[Uint]
     tx_hash: Optional[Hash32]
+    intrinsic_regular_gas: Uint
+    intrinsic_state_gas: Uint
     state_changes: "StateChanges" = field(default_factory=StateChanges)
 
 
@@ -128,6 +150,7 @@ class Message:
     target: Bytes0 | Address
     current_target: Address
     gas: Uint
+    state_gas_reservoir: Uint
     value: U256
     data: Bytes
     code_address: Optional[Address]
@@ -152,6 +175,7 @@ class Evm:
     memory: bytearray
     code: Bytes
     gas_left: Uint
+    state_gas_reservoir_left: Uint
     valid_jump_destinations: Set[Uint]
     logs: Tuple[Log, ...]
     refund_counter: int
@@ -164,6 +188,9 @@ class Evm:
     accessed_addresses: Set[Address]
     accessed_storage_keys: Set[Tuple[Address, Bytes32]]
     state_changes: StateChanges
+    gas_used: Dict[GasType, Uint] = field(
+        default_factory=lambda: {gt: Uint(0) for gt in GasType}
+    )
 
 
 def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
@@ -179,11 +206,14 @@ def incorporate_child_on_success(evm: Evm, child_evm: Evm) -> None:
 
     """
     evm.gas_left += child_evm.gas_left
+    evm.state_gas_reservoir_left += child_evm.state_gas_reservoir_left
     evm.logs += child_evm.logs
     evm.refund_counter += child_evm.refund_counter
     evm.accounts_to_delete.update(child_evm.accounts_to_delete)
     evm.accessed_addresses.update(child_evm.accessed_addresses)
     evm.accessed_storage_keys.update(child_evm.accessed_storage_keys)
+    for gas_type in GasType:
+        evm.gas_used[gas_type] += child_evm.gas_used[gas_type]
 
     merge_on_success(child_evm.state_changes)
 
@@ -201,5 +231,8 @@ def incorporate_child_on_error(evm: Evm, child_evm: Evm) -> None:
 
     """
     evm.gas_left += child_evm.gas_left
+    evm.state_gas_reservoir_left += child_evm.state_gas_reservoir_left
+    for gas_type in GasType:
+        evm.gas_used[gas_type] += child_evm.gas_used[gas_type]
 
     merge_on_failure(child_evm.state_changes)

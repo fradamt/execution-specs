@@ -21,13 +21,12 @@ from ethereum.utils.numeric import ceil32, taylor_exponential
 
 from ..blocks import Header
 from ..transactions import BlobTransaction, Transaction
-from . import Evm
+from . import Evm, GasType
 from .exceptions import OutOfGasError
 
 GAS_JUMPDEST = Uint(1)
 GAS_BASE = Uint(2)
 GAS_VERY_LOW = Uint(3)
-GAS_STORAGE_SET = Uint(20000)
 GAS_STORAGE_UPDATE = Uint(5000)
 GAS_STORAGE_CLEAR_REFUND = Uint(4800)
 GAS_LOW = Uint(5)
@@ -43,14 +42,10 @@ GAS_BLOCK_HASH = Uint(20)
 GAS_LOG = Uint(375)
 GAS_LOG_DATA = Uint(8)
 GAS_LOG_TOPIC = Uint(375)
-GAS_CREATE = Uint(32000)
-GAS_CODE_DEPOSIT = Uint(200)
 GAS_ZERO = Uint(0)
-GAS_NEW_ACCOUNT = Uint(25000)
 GAS_CALL_VALUE = Uint(9000)
 GAS_CALL_STIPEND = Uint(2300)
 GAS_SELF_DESTRUCT = Uint(5000)
-GAS_SELF_DESTRUCT_NEW_ACCOUNT = Uint(25000)
 GAS_ECRECOVER = Uint(3000)
 GAS_P256VERIFY = Uint(6900)
 GAS_SHA256 = Uint(60)
@@ -76,6 +71,23 @@ BLOB_BASE_COST = Uint(2**13)
 BLOB_SCHEDULE_MAX = U64(21)
 MIN_BLOB_GASPRICE = Uint(1)
 BLOB_BASE_FEE_UPDATE_FRACTION = Uint(11684671)
+
+# State gas constants (EIP-8037)
+TARGET_STATE_GROWTH_PER_YEAR = Uint(100 * 1024**3)
+BLOCKS_PER_YEAR = Uint(7200 * 365)
+STATE_GAS_PER_BYTE_QUANTIZE_DIVISOR = Uint(32)
+
+# State byte constants (EIP-8037 harmonization)
+NEW_ACCOUNT_BYTES = Uint(112)
+STORAGE_SET_BYTES = Uint(32)
+PER_AUTH_BASE_BYTES = Uint(23)
+
+# EIP-7702 authorization base cost (regular gas per authorization)
+# Covers: calldata (1616) + ecrecover (3000) + cold access (2600) + warm write (200)
+PER_AUTH_BASE_COST = Uint(7500)
+
+# TBD: CREATE regular gas - placeholder until EIP-8037 specifies
+REGULAR_GAS_CREATE = Uint(2600)
 
 GAS_BLS_G1_ADD = Uint(375)
 GAS_BLS_G1_MUL = Uint(12000)
@@ -118,6 +130,29 @@ class MessageCallGas:
     sub_call: Uint
 
 
+def get_state_gas_per_byte(gas_limit: Uint) -> Uint:
+    """
+    Calculate the state gas cost per byte based on the block gas limit.
+
+    Parameters
+    ----------
+    gas_limit :
+        The block gas limit.
+
+    Returns
+    -------
+    state_gas_per_byte : `Uint`
+        The state gas cost per byte.
+
+    """
+    # EIP-8037: cost_per_state_byte = ceil((gas_limit/2) * 7200 * 365 / TARGET)
+    numerator = gas_limit * BLOCKS_PER_YEAR
+    denominator = Uint(2) * TARGET_STATE_GROWTH_PER_YEAR
+    raw = (numerator + denominator - Uint(1)) // denominator
+    q = max(Uint(1), raw // STATE_GAS_PER_BYTE_QUANTIZE_DIVISOR)
+    return max((raw // q) * q, Uint(1))
+
+
 def check_gas(evm: Evm, amount: Uint) -> None:
     """
     Checks if `amount` gas is available without charging it.
@@ -135,9 +170,16 @@ def check_gas(evm: Evm, amount: Uint) -> None:
         raise OutOfGasError
 
 
-def charge_gas(evm: Evm, amount: Uint) -> None:
+def charge_gas(
+    evm: Evm, amount: Uint, gas_type: GasType = GasType.REGULAR
+) -> None:
     """
-    Subtracts `amount` from `evm.gas_left`.
+    Subtracts `amount` from the appropriate gas pool and updates gas usage.
+
+    For STATE gas, charges from the reservoir (state_gas_reservoir_left) first,
+    then from gas_left when the reservoir is empty.
+
+    For REGULAR gas, charges from gas_left only.
 
     Parameters
     ----------
@@ -145,14 +187,29 @@ def charge_gas(evm: Evm, amount: Uint) -> None:
         The current EVM.
     amount :
         The amount of gas the current operation requires.
+    gas_type :
+        The type of gas being charged. Defaults to REGULAR.
 
     """
     evm_trace(evm, GasAndRefund(int(amount)))
 
-    if evm.gas_left < amount:
-        raise OutOfGasError
+    if gas_type == GasType.STATE:
+        # Draw from reservoir first, then gas_left
+        if evm.state_gas_reservoir_left >= amount:
+            evm.state_gas_reservoir_left -= amount
+        elif evm.state_gas_reservoir_left + evm.gas_left >= amount:
+            remainder = amount - evm.state_gas_reservoir_left
+            evm.state_gas_reservoir_left = Uint(0)
+            evm.gas_left -= remainder
+        else:
+            raise OutOfGasError
     else:
+        # Regular gas: draw from gas_left only
+        if evm.gas_left < amount:
+            raise OutOfGasError
         evm.gas_left -= amount
+
+    evm.gas_used[gas_type] += amount
 
 
 def calculate_memory_gas_cost(size_in_bytes: Uint) -> Uint:
