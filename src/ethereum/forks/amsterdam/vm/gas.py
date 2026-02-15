@@ -75,7 +75,8 @@ BLOB_BASE_FEE_UPDATE_FRACTION = Uint(11684671)
 # State gas constants (EIP-8037)
 TARGET_STATE_GROWTH_PER_YEAR = Uint(100 * 1024**3)
 BLOCKS_PER_YEAR = Uint(7200 * 365)
-STATE_GAS_PER_BYTE_QUANTIZE_DIVISOR = Uint(32)
+CPSB_SIGNIFICANT_BITS = 5
+CPSB_OFFSET = Uint(9578)
 
 # State byte constants (EIP-8037 harmonization)
 NEW_ACCOUNT_BYTES = Uint(112)
@@ -86,8 +87,12 @@ PER_AUTH_BASE_BYTES = Uint(23)
 # Covers: calldata (1616) + ecrecover (3000) + cold access (2600) + warm write (200)
 PER_AUTH_BASE_COST = Uint(7500)
 
-# TBD: CREATE regular gas - placeholder until EIP-8037 specifies
-REGULAR_GAS_CREATE = Uint(2600)
+# CREATE regular gas (EIP-8037): 9000, same as GAS_CALL_VALUE.
+# NOTE: 9000 may overcharge — GAS_CALL_VALUE includes the 2300 stipend
+# (forwarded to subcall, not consumed by caller), so only 6700 of it is
+# genuine transfer overhead. CREATE has no stipend, so its regular gas
+# arguably should be lower. Using 9000 for now to match the EIP table.
+GAS_CREATE = Uint(9000)
 
 GAS_BLS_G1_ADD = Uint(375)
 GAS_BLS_G1_MUL = Uint(12000)
@@ -134,6 +139,10 @@ def get_state_gas_per_byte(gas_limit: Uint) -> Uint:
     """
     Calculate the state gas cost per byte based on the block gas limit.
 
+    Uses the EIP-8037 significant-bits quantization: retain the top
+    ``CPSB_SIGNIFICANT_BITS`` bits of ``(raw + CPSB_OFFSET)``, zero the
+    rest, then subtract ``CPSB_OFFSET``.
+
     Parameters
     ----------
     gas_limit :
@@ -141,16 +150,21 @@ def get_state_gas_per_byte(gas_limit: Uint) -> Uint:
 
     Returns
     -------
-    state_gas_per_byte : `Uint`
+    cost_per_state_byte : `Uint`
         The state gas cost per byte.
 
     """
-    # EIP-8037: cost_per_state_byte = ceil((gas_limit/2) * 7200 * 365 / TARGET)
     numerator = gas_limit * BLOCKS_PER_YEAR
     denominator = Uint(2) * TARGET_STATE_GROWTH_PER_YEAR
     raw = (numerator + denominator - Uint(1)) // denominator
-    q = max(Uint(1), raw // STATE_GAS_PER_BYTE_QUANTIZE_DIVISOR)
-    return max((raw // q) * q, Uint(1))
+
+    shifted = raw + CPSB_OFFSET
+    shift = max(int(shifted.bit_length()) - CPSB_SIGNIFICANT_BITS, 0)
+    quantized = (shifted >> shift) << shift
+
+    if quantized <= CPSB_OFFSET:
+        return Uint(1)
+    return Uint(quantized - CPSB_OFFSET)
 
 
 def check_gas(evm: Evm, amount: Uint) -> None:

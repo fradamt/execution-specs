@@ -602,7 +602,7 @@ def calculate_intrinsic_cost(
         NEW_ACCOUNT_BYTES,
         PER_AUTH_BASE_BYTES,
         PER_AUTH_BASE_COST,
-        REGULAR_GAS_CREATE,
+        GAS_CREATE,
         get_state_gas_per_byte,
         init_code_cost,
     )
@@ -626,7 +626,7 @@ def calculate_intrinsic_cost(
     create_state_gas = Uint(0)
     if tx.to == Bytes0(b""):
         create_state_gas = NEW_ACCOUNT_BYTES * state_gas_per_byte
-        create_regular_gas = REGULAR_GAS_CREATE + init_code_cost(ulen(tx.data))
+        create_regular_gas = GAS_CREATE + init_code_cost(ulen(tx.data))
 
     access_list_gas = Uint(0)
     if isinstance(
